@@ -1,16 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { SquarePen, Settings as SettingsIcon, Trash2 } from "lucide-react";
-import type { ToolCall } from "ollama/browser";
+import type { ModelRef, ToolCall } from "./llm";
 import Chat from "./components/Chat";
 import Settings from "./components/Settings";
-import { DEFAULT_MODEL, addUserMessage, listModels, runAgent, type Live } from "./agent";
+import { addUserMessage, runAgent, type Live } from "./agent";
+import { DEFAULT_MODEL, getProvider, listAllModels, readModel } from "./providers";
 import {
   addMessage,
   createSession,
   deleteSession,
   getMessages,
-  getSetting,
   listSessions,
   setSetting,
   type ChatMessage,
@@ -24,6 +23,8 @@ function friendlyError(e: unknown): string {
   const msg = e instanceof Error ? e.message : String(e);
   if (/401|unauthorized/i.test(msg)) return "Ollama rejected the API key. Check it in Settings.";
   if (/does not support tools/i.test(msg)) return "This model can't use tools (quizzes, research). Pick another model.";
+  if (/Claude Code isn't installed/.test(msg)) return "Claude Code isn't installed. Get it at claude.com/claude-code, then restart Dusty.";
+  if (/not logged in|run \/login/i.test(msg)) return "Claude Code isn't logged in. Run claude once in a terminal to sign in.";
   return msg;
 }
 
@@ -44,9 +45,9 @@ export default function App() {
   const [runs, setRuns] = useState<Record<string, Run>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [models, setModels] = useState<string[]>([]);
-  const [model, setModel] = useState(DEFAULT_MODEL);
-  const [hasKey, setHasKey] = useState(true);
+  const [models, setModels] = useState<ModelRef[]>([]);
+  const [model, setModel] = useState<ModelRef>(DEFAULT_MODEL);
+  const [setupHint, setSetupHint] = useState<string | null>(null);
   const activeRef = useRef(activeId);
 
   const refreshSessions = useCallback(() => listSessions().then(setSessions), []);
@@ -55,9 +56,10 @@ export default function App() {
     if (activeRef.current === sid) setMessages(m);
   }, []);
   const loadConfig = useCallback(async () => {
-    setModel(await getSetting("model", DEFAULT_MODEL));
-    setHasKey(!!(await invoke<string | null>("get_api_key")));
-    listModels().then(setModels, () => setModels([]));
+    const m = await readModel();
+    setModel(m);
+    getProvider(m.provider).setupHint().then(setSetupHint, () => setSetupHint(null));
+    listAllModels().then(setModels);
   }, []);
 
   useEffect(() => {
@@ -169,12 +171,13 @@ export default function App() {
         live={run?.live ?? null}
         running={!!run}
         error={activeId ? errors[activeId] : undefined}
-        hasKey={hasKey}
+        setupHint={setupHint}
         models={models}
         model={model}
-        onModelChange={(m) => {
+        onModelChange={async (m) => {
           setModel(m);
-          setSetting("model", m);
+          await setSetting("model", m);
+          loadConfig();
         }}
         onSend={send}
         onStop={() => run?.controller.abort()}

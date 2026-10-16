@@ -1,4 +1,4 @@
-import type { Message } from "ollama/browser";
+import type { Message } from "./llm";
 
 export type Option = { label: string; value: string };
 

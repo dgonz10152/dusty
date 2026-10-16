@@ -1,9 +1,10 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ArrowUp, ChevronDown, Globe, Square } from "lucide-react";
-import type { ToolCall } from "ollama/browser";
+import type { ModelRef, ToolCall } from "../llm";
 import Markdown from "./Markdown";
 import { QuestionCard, QuizCard } from "./Cards";
 import { INTERACTIVE, pendingCall, type Live } from "../agent";
+import { PROVIDERS, sameModel } from "../providers";
 import type { ChatMessage } from "../db";
 
 type Props = {
@@ -12,10 +13,10 @@ type Props = {
   live: Live | null;
   running: boolean;
   error?: string;
-  hasKey: boolean;
-  models: string[];
-  model: string;
-  onModelChange: (model: string) => void;
+  setupHint: string | null;
+  models: ModelRef[];
+  model: ModelRef;
+  onModelChange: (model: ModelRef) => void;
   onSend: (text: string) => void;
   onStop: () => void;
   onAnswer: (call: ToolCall, content: string) => void;
@@ -31,6 +32,12 @@ function Thinking({ text, active }: { text: string; active?: boolean }) {
     </details>
   );
 }
+
+const WRITING: Record<string, string> = {
+  quiz: "Writing a quiz",
+  ask_user_question: "Writing a question",
+  research: "Planning research",
+};
 
 function ToolView({ call, result, onAnswer }: { call: ToolCall; result?: string; onAnswer?: (content: string) => void }) {
   const args = call.function.arguments;
@@ -82,7 +89,8 @@ function Composer({
     onSend(text.trim());
     setText("");
   };
-  const options = models.includes(model) ? models : [model, ...models];
+  const options = models.some((m) => sameModel(m, model)) ? models : [model, ...models];
+  const label = (m: ModelRef) => `${PROVIDERS.find((p) => p.id === m.provider)?.label ?? m.provider} · ${m.model}`;
 
   return (
     <div className={`composer ${disabled ? "disabled" : ""}`}>
@@ -103,14 +111,24 @@ function Composer({
       />
       <div className="composer-bar">
         <label className="model-picker">
-          <select value={model} onChange={(e) => onModelChange(e.target.value)} aria-label="Model">
-            {options.map((m) => (
-              <option key={m} value={m}>
-                {m}
-              </option>
+          <select
+            value={options.findIndex((m) => sameModel(m, model))}
+            onChange={(e) => onModelChange(options[Number(e.target.value)])}
+            aria-label="Model"
+          >
+            {PROVIDERS.filter((p) => options.some((m) => m.provider === p.id)).map((p) => (
+              <optgroup key={p.id} label={p.label}>
+                {options.map((m, i) =>
+                  m.provider === p.id ? (
+                    <option key={i} value={i}>
+                      {m.model}
+                    </option>
+                  ) : null,
+                )}
+              </optgroup>
             ))}
           </select>
-          <span>{model}</span>
+          <span>{label(model)}</span>
           <ChevronDown size={14} />
         </label>
         {running ? (
@@ -128,7 +146,7 @@ function Composer({
 }
 
 export default function Chat(props: Props) {
-  const { title, messages, live, running, error, hasKey, onAnswer, onRetry, onOpenSettings } = props;
+  const { title, messages, live, running, error, setupHint, onAnswer, onRetry, onOpenSettings } = props;
   const scroller = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
 
@@ -190,9 +208,9 @@ export default function Chat(props: Props) {
         <div className="empty">
           <h1>What do you want to learn?</h1>
           <p className="muted">Dusty finds what you already know, plans a path, then teaches it so it sticks.</p>
-          {!hasKey && (
+          {setupHint && (
             <button className="notice" onClick={onOpenSettings}>
-              Add your Ollama API key in Settings to get started
+              {setupHint}
             </button>
           )}
           <div className="empty-composer">{composer}</div>
@@ -220,6 +238,7 @@ export default function Chat(props: Props) {
                 <div className="msg assistant">
                   {live.thinking && <Thinking text={live.thinking} active={!live.content} />}
                   {live.content && <Markdown text={live.content} streaming />}
+                  {live.tool && <div className="tool-chip shimmer">{WRITING[live.tool] ?? `Calling ${live.tool}`}</div>}
                 </div>
               )}
               {running && !live && <div className="msg assistant"><span className="dot-pulse" /></div>}

@@ -1,5 +1,5 @@
 import Database from "@tauri-apps/plugin-sql";
-import type { Message } from "ollama/browser";
+import type { Message } from "./llm";
 
 export type Session = { id: string; title: string; created_at: number; updated_at: number };
 export type ChatMessage = Message & { id: number; role: "user" | "assistant" | "tool" };

@@ -1,30 +1,15 @@
-import { Ollama, type Message, type Tool, type ToolCall } from "ollama/browser";
-import { fetch } from "@tauri-apps/plugin-http";
-import { invoke } from "@tauri-apps/api/core";
 import { addMessage, getMessages, getSetting } from "./db";
+import type { Message, Tool, ToolCall } from "./llm";
 import { EMPTY_PROFILE, RESEARCHER, teacherPrompt, type Profile } from "./prompts";
+import { getProvider, readModel } from "./providers";
 import { salvageToolCall } from "./quiz";
-
-export const DEFAULT_HOST = "https://ollama.com";
-export const DEFAULT_MODEL = "gpt-oss:120b";
 
 /** Tools answered by the student through a card in the chat; the loop stops and resumes on answer. */
 export const INTERACTIVE = new Set(["quiz", "ask_user_question"]);
 
-export async function getClient() {
-  const host = await getSetting("host", DEFAULT_HOST);
-  const key = await invoke<string | null>("get_api_key");
-  return new Ollama({ host, fetch, headers: key ? { Authorization: `Bearer ${key}` } : {} });
-}
-
-export async function listModels(): Promise<string[]> {
-  const { models } = await (await getClient()).list();
-  return models.map((m) => m.name).sort();
-}
-
 const fn = (name: string, description: string, properties: Record<string, unknown>, required: string[]): Tool => ({
   type: "function",
-  function: { name, description, parameters: { type: "object", properties, required } as Tool["function"]["parameters"] },
+  function: { name, description, parameters: { type: "object", properties, required } },
 });
 
 const optionsSchema = {
@@ -71,72 +56,8 @@ const TEACHER_TOOLS: Tool[] = [
   ),
 ];
 
-const WEB_TOOLS: Tool[] = [
-  fn("web_search", "Search the web.", { query: { type: "string" } }, ["query"]),
-  fn("web_fetch", "Fetch a web page's main content.", { url: { type: "string" } }, ["url"]),
-];
-
-export type Live = { content: string; thinking: string; status?: string };
-
-/** Streams one assistant turn, accumulating content, thinking, and tool calls. */
-async function chatOnce(
-  client: Ollama,
-  model: string,
-  messages: Message[],
-  tools: Tool[],
-  signal: AbortSignal,
-  onDelta?: (m: Message) => void,
-): Promise<Message> {
-  const stream = await client
-    .chat({ model, messages, tools, stream: true, think: true })
-    .catch((e) => {
-      if (!String(e?.message ?? e).includes("does not support thinking")) throw e;
-      return client.chat({ model, messages, tools, stream: true });
-    });
-  const stop = () => stream.abort();
-  signal.addEventListener("abort", stop);
-  const msg: Message = { role: "assistant", content: "", thinking: "", tool_calls: [] };
-  try {
-    for await (const part of stream) {
-      msg.content += part.message.content ?? "";
-      msg.thinking += part.message.thinking ?? "";
-      if (part.message.tool_calls) msg.tool_calls!.push(...part.message.tool_calls);
-      onDelta?.(msg);
-    }
-  } finally {
-    signal.removeEventListener("abort", stop);
-  }
-  return msg;
-}
-
-const clip = (s: string, n = 12000) => (s.length > n ? `${s.slice(0, n)}\n...[truncated]` : s);
-
-async function research(client: Ollama, model: string, question: string, signal: AbortSignal): Promise<string> {
-  const messages: Message[] = [
-    { role: "system", content: RESEARCHER },
-    { role: "user", content: question },
-  ];
-  // ponytail: fixed step cap; make it a setting if research regularly needs more
-  for (let step = 0; step < 10; step++) {
-    const msg = await chatOnce(client, model, messages, WEB_TOOLS, signal);
-    messages.push(msg);
-    if (!msg.tool_calls?.length) return msg.content;
-    for (const call of msg.tool_calls) {
-      let content: string;
-      try {
-        const args = call.function.arguments;
-        if (call.function.name === "web_search") content = JSON.stringify(await client.webSearch({ query: String(args.query) }));
-        else if (call.function.name === "web_fetch") content = JSON.stringify(await client.webFetch({ url: String(args.url) }));
-        else content = `Unknown tool: ${call.function.name}`;
-      } catch (e) {
-        content = `Error: ${e instanceof Error ? e.message : String(e)}`;
-      }
-      if (signal.aborted) throw new DOMException("Aborted", "AbortError");
-      messages.push({ role: "tool", tool_name: call.function.name, content: clip(content) });
-    }
-  }
-  return messages.at(-1)?.content || "Research hit its step limit without a conclusion.";
-}
+/** A turn in progress. `tool` is a tool call the model has started writing but not finished. */
+export type Live = { content: string; thinking: string; status?: string; tool?: string };
 
 /** The next tool call of the latest assistant turn that has no result yet (results are stored in call order). */
 export function pendingCall(messages: Message[]): ToolCall | undefined {
@@ -166,8 +87,8 @@ export async function runAgent(
   onLive: (live: Live | null) => void,
   onSaved: () => Promise<void>,
 ) {
-  const client = await getClient();
-  const model = await getSetting("model", DEFAULT_MODEL);
+  const { provider: providerId, model } = await readModel();
+  const provider = getProvider(providerId);
   const system = teacherPrompt(await getSetting<Profile>("profile", EMPTY_PROFILE));
   try {
     for (;;) {
@@ -180,7 +101,7 @@ export async function runAgent(
           const question = String(call.function.arguments.question ?? "");
           onLive({ content: "", thinking: "", status: `Researching: ${question}` });
           try {
-            content = await research(client, model, question, signal);
+            content = await provider.research({ model, system: RESEARCHER, question, signal });
           } catch (e) {
             if (signal.aborted) throw e;
             content = `Research failed: ${e instanceof Error ? e.message : String(e)}`;
@@ -197,9 +118,16 @@ export async function runAgent(
       let partial: Message | null = null;
       try {
         const msg = salvageToolCall(
-          await chatOnce(client, model, [{ role: "system", content: system }, ...messages], TEACHER_TOOLS, signal, (m) => {
-            partial = m;
-            onLive({ content: m.content, thinking: m.thinking ?? "" });
+          await provider.chat({
+            model,
+            system,
+            messages,
+            tools: TEACHER_TOOLS,
+            signal,
+            onDelta: (m) => {
+              partial = m;
+              onLive({ content: m.content, thinking: m.thinking ?? "", tool: m.tool_calls?.at(-1)?.function.name });
+            },
           }),
         );
         await addMessage(sessionId, msg);
