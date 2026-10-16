@@ -207,6 +207,19 @@ fn migrations() -> Vec<Migration> {
             CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
         ",
         kind: MigrationKind::Up,
+    },
+    Migration {
+        version: 2,
+        description: "add_folders",
+        sql: "
+            CREATE TABLE folders (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                created_at INTEGER NOT NULL
+            );
+            ALTER TABLE sessions ADD COLUMN folder_id TEXT REFERENCES folders(id) ON DELETE SET NULL;
+        ",
+        kind: MigrationKind::Up,
     }]
 }
 

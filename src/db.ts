@@ -1,7 +1,8 @@
 import Database from "@tauri-apps/plugin-sql";
 import type { Message } from "./llm";
 
-export type Session = { id: string; title: string; created_at: number; updated_at: number };
+export type Session = { id: string; title: string; folder_id: string | null; created_at: number; updated_at: number };
+export type Folder = { id: string; name: string; created_at: number };
 export type ChatMessage = Message & { id: number; role: "user" | "assistant" | "tool" };
 
 type MessageRow = {
@@ -25,7 +26,7 @@ export async function listSessions(): Promise<Session[]> {
 
 export async function createSession(title: string): Promise<Session> {
   const now = Date.now();
-  const session = { id: crypto.randomUUID(), title, created_at: now, updated_at: now };
+  const session = { id: crypto.randomUUID(), title, folder_id: null, created_at: now, updated_at: now };
   await (await db()).execute("INSERT INTO sessions (id, title, created_at, updated_at) VALUES ($1, $2, $3, $4)", [
     session.id,
     session.title,
@@ -40,6 +41,31 @@ export async function deleteSession(id: string) {
   const d = await db();
   await d.execute("DELETE FROM messages WHERE session_id = $1", [id]);
   await d.execute("DELETE FROM sessions WHERE id = $1", [id]);
+}
+
+export async function listFolders(): Promise<Folder[]> {
+  return (await db()).select("SELECT * FROM folders ORDER BY name COLLATE NOCASE");
+}
+
+export async function createFolder(name: string): Promise<Folder> {
+  const folder = { id: crypto.randomUUID(), name, created_at: Date.now() };
+  await (await db()).execute("INSERT INTO folders (id, name, created_at) VALUES ($1, $2, $3)", [folder.id, name, folder.created_at]);
+  return folder;
+}
+
+export async function renameFolder(id: string, name: string) {
+  await (await db()).execute("UPDATE folders SET name = $1 WHERE id = $2", [name, id]);
+}
+
+/** Deletes the folder but keeps its lessons, which move back to the top level. */
+export async function deleteFolder(id: string) {
+  const d = await db();
+  await d.execute("UPDATE sessions SET folder_id = NULL WHERE folder_id = $1", [id]);
+  await d.execute("DELETE FROM folders WHERE id = $1", [id]);
+}
+
+export async function moveSession(id: string, folderId: string | null) {
+  await (await db()).execute("UPDATE sessions SET folder_id = $1 WHERE id = $2", [folderId, id]);
 }
 
 export async function getMessages(sessionId: string): Promise<ChatMessage[]> {

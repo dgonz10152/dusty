@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { SquarePen, Settings as SettingsIcon, Trash2 } from "lucide-react";
 import type { ModelRef, ToolCall } from "./llm";
 import Chat from "./components/Chat";
 import Settings from "./components/Settings";
+import Sidebar from "./components/Sidebar";
 import { addUserMessage, runAgent, type Live } from "./agent";
 import { DEFAULT_MODEL, getProvider, listAllModels, readModel } from "./providers";
 import {
@@ -10,9 +10,11 @@ import {
   createSession,
   deleteSession,
   getMessages,
+  listFolders,
   listSessions,
   setSetting,
   type ChatMessage,
+  type Folder,
   type Session,
 } from "./db";
 import "./App.css";
@@ -28,18 +30,9 @@ function friendlyError(e: unknown): string {
   return msg;
 }
 
-function relativeTime(ms: number): string {
-  const mins = Math.round((Date.now() - ms) / 60000);
-  if (mins < 1) return "now";
-  if (mins < 60) return `${mins}m`;
-  const hours = Math.round(mins / 60);
-  if (hours < 24) return `${hours}h`;
-  const days = Math.round(hours / 24);
-  return days < 7 ? `${days}d` : `${Math.round(days / 7)}w`;
-}
-
 export default function App() {
   const [sessions, setSessions] = useState<Session[]>([]);
+  const [folders, setFolders] = useState<Folder[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [runs, setRuns] = useState<Record<string, Run>>({});
@@ -50,7 +43,11 @@ export default function App() {
   const [setupHint, setSetupHint] = useState<string | null>(null);
   const activeRef = useRef(activeId);
 
-  const refreshSessions = useCallback(() => listSessions().then(setSessions), []);
+  const refreshSessions = useCallback(async () => {
+    const [s, f] = await Promise.all([listSessions(), listFolders()]);
+    setSessions(s);
+    setFolders(f);
+  }, []);
   const reloadMessages = useCallback(async (sid: string) => {
     const m = await getMessages(sid);
     if (activeRef.current === sid) setMessages(m);
@@ -129,41 +126,16 @@ export default function App() {
 
   return (
     <div className="app">
-      <aside className="sidebar">
-        <div className="sidebar-top" data-tauri-drag-region />
-        <button className="nav-item" onClick={() => select(null)}>
-          <SquarePen size={16} /> New lesson
-        </button>
-        {sessions.length > 0 && <div className="sidebar-label">Lessons</div>}
-        <nav className="session-list">
-          {sessions.map((s) => (
-            <div
-              key={s.id}
-              role="button"
-              tabIndex={0}
-              className={`session ${s.id === activeId ? "active" : ""}`}
-              onClick={() => select(s.id)}
-              onKeyDown={(e) => e.key === "Enter" && select(s.id)}
-            >
-              <span className="session-title">{s.title}</span>
-              {runs[s.id] ? <span className="dot-pulse small" /> : <span className="session-time">{relativeTime(s.updated_at)}</span>}
-              <button
-                className="icon-btn session-delete"
-                aria-label="Delete lesson"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  remove(s.id);
-                }}
-              >
-                <Trash2 size={14} />
-              </button>
-            </div>
-          ))}
-        </nav>
-        <button className="nav-item" onClick={() => setSettingsOpen(true)}>
-          <SettingsIcon size={16} /> Settings
-        </button>
-      </aside>
+      <Sidebar
+        sessions={sessions}
+        folders={folders}
+        activeId={activeId}
+        running={(sid) => !!runs[sid]}
+        onSelect={select}
+        onDelete={remove}
+        onChange={refreshSessions}
+        onOpenSettings={() => setSettingsOpen(true)}
+      />
       <Chat
         key={activeId ?? "new"}
         title={sessions.find((s) => s.id === activeId)?.title}
