@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Check, X } from "lucide-react";
+import { Check, Lightbulb, X } from "lucide-react";
 import Markdown from "./Markdown";
 import { gradeQuiz, normalizeOptions, parseQuizArgs, type Option, type QuizResult } from "../quiz";
 
@@ -38,6 +38,9 @@ function useSelection(multi: boolean) {
   return [selected, toggle] as const;
 }
 
+// "reveal" shows the answer after "I don't know" - not a win, so it isn't green.
+type Mark = "right" | "wrong" | "missed" | "reveal";
+
 function OptionRow({
   option,
   multi,
@@ -49,7 +52,7 @@ function OptionRow({
   option: Option;
   multi: boolean;
   checked: boolean;
-  mark?: "right" | "wrong" | "missed";
+  mark?: Mark;
   disabled: boolean;
   onToggle: () => void;
 }) {
@@ -61,6 +64,7 @@ function OptionRow({
       </span>
       {mark === "right" || mark === "missed" ? <Check size={16} className="mark" /> : null}
       {mark === "wrong" ? <X size={16} className="mark" /> : null}
+      {mark === "reveal" ? <Lightbulb size={16} className="mark" /> : null}
     </label>
   );
 }
@@ -76,9 +80,10 @@ export function QuizCard({ args: raw, result, onAnswer }: CardProps) {
   const [note, setNote] = useState("");
   const submit = (pick: string[] | null) => onAnswer(JSON.stringify(gradeQuiz(args, pick, note)));
 
-  const markFor = (v: string): "right" | "wrong" | "missed" | undefined => {
+  const markFor = (v: string): Mark | undefined => {
     if (!answer) return undefined;
     const isCorrect = args.correct.includes(v);
+    if (answer.result === "dont_know") return isCorrect ? "reveal" : undefined;
     const picked = answer.selected.includes(v);
     if (isCorrect) return picked ? "right" : "missed";
     return picked ? "wrong" : undefined;

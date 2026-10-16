@@ -16,6 +16,7 @@
   --green-bg: rgba(22, 163, 74, 0.09);
   --red: #b91c1c;
   --red-bg: rgba(220, 38, 38, 0.08);
+  --amber: #b45309;
   --amber-bg: rgba(217, 119, 6, 0.09);
   --accent: #7c3aed;
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 4px 16px rgba(0, 0, 0, 0.06);
@@ -50,6 +51,7 @@
     --green-bg: rgba(74, 222, 128, 0.08);
     --red: #f87171;
     --red-bg: rgba(248, 113, 113, 0.08);
+    --amber: #fbbf24;
     --amber-bg: rgba(251, 191, 36, 0.08);
     --accent: #a78bfa;
     --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.3);
@@ -771,6 +773,16 @@ div.tool-chip {
 .option.right .mark,
 .option.missed .mark {
   color: var(--green);
+}
+
+.option.reveal {
+  border-color: transparent;
+  background: var(--amber-bg);
+}
+
+.option.reveal .mark,
+.card.dont_know .verdict {
+  color: var(--amber);
 }
 
 .option.wrong {
