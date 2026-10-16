@@ -1,6 +1,16 @@
 import { useState, type DragEvent } from "react";
 import { Menu } from "@tauri-apps/api/menu";
-import { ChevronRight, Ellipsis, Folder as FolderIcon, FolderPlus, Settings as SettingsIcon, SquarePen, Trash2 } from "lucide-react";
+import {
+  ChevronRight,
+  CircleCheck,
+  Ellipsis,
+  Folder as FolderIcon,
+  FolderPlus,
+  GraduationCap,
+  Settings as SettingsIcon,
+  SquarePen,
+  Trash2,
+} from "lucide-react";
 import { createFolder, deleteFolder, moveSession, renameFolder, type Folder, type Session } from "../db";
 
 const DRAG_TYPE = "application/x-dusty-lesson";
@@ -29,18 +39,18 @@ type Props = {
   folders: Folder[];
   activeId: string | null;
   running: (sid: string) => boolean;
-  onSelect: (sid: string | null) => void;
+  onSelect: (sid: string) => void;
+  onNew: (kind: Session["kind"]) => void;
   onDelete: (sid: string) => void;
   onChange: () => void;
   onOpenSettings: () => void;
 };
 
-export default function Sidebar({ sessions, folders, activeId, running, onSelect, onDelete, onChange, onOpenSettings }: Props) {
+export default function Sidebar({ sessions, folders, activeId, running, onSelect, onNew, onDelete, onChange, onOpenSettings }: Props) {
   const [collapsed, setCollapsed] = useState(loadCollapsed);
   const [editing, setEditing] = useState<string | null>(null);
   // The folder id a lesson is being dragged over; "" is the top level.
   const [dropTarget, setDropTarget] = useState<string | null>(null);
-
   function toggle(id: string) {
     const next = new Set(collapsed);
     if (!next.delete(id)) next.add(id);
@@ -76,20 +86,24 @@ export default function Sidebar({ sessions, folders, activeId, running, onSelect
   async function lessonMenu(e: React.MouseEvent, s: Session) {
     e.preventDefault();
     e.stopPropagation();
+    const remove = { text: s.kind === "exam" ? "Delete exam" : "Delete lesson", action: () => onDelete(s.id) };
+    // An exam's lessons live under their exam, so only top-level items move between folders.
     const menu = await Menu.new({
-      items: [
-        {
-          text: "Move to",
-          items: [
-            { text: "No folder", checked: s.folder_id === null, action: () => move(s.id, null) },
-            ...folders.map((f) => ({ text: f.name, checked: s.folder_id === f.id, action: () => move(s.id, f.id) })),
+      items: isChild(s)
+        ? [remove]
+        : [
+            {
+              text: "Move to",
+              items: [
+                { text: "No folder", checked: s.folder_id === null, action: () => move(s.id, null) },
+                ...folders.map((f) => ({ text: f.name, checked: s.folder_id === f.id, action: () => move(s.id, f.id) })),
+                { item: "Separator" },
+                { text: "New folder", action: () => newFolder(s.id) },
+              ],
+            },
             { item: "Separator" },
-            { text: "New folder", action: () => newFolder(s.id) },
+            remove,
           ],
-        },
-        { item: "Separator" },
-        { text: "Delete lesson", action: () => onDelete(s.id) },
-      ],
     });
     await menu.popup();
   }
@@ -126,44 +140,108 @@ export default function Sidebar({ sessions, folders, activeId, running, onSelect
     },
   });
 
-  const lessonRow = (s: Session, nested = false) => (
+  const examIds = new Set(sessions.filter((s) => s.kind === "exam").map((s) => s.id));
+  // A lesson whose exam was deleted falls back to a regular lesson.
+  const isChild = (s: Session) => !!s.parent_id && examIds.has(s.parent_id);
+  const top = sessions.filter((s) => !isChild(s));
+
+  const deleteButton = (s: Session) => (
+    <button
+      className="icon-btn session-delete"
+      aria-label={s.kind === "exam" ? "Delete exam" : "Delete lesson"}
+      onClick={(e) => {
+        e.stopPropagation();
+        onDelete(s.id);
+      }}
+    >
+      <Trash2 size={14} />
+    </button>
+  );
+
+  const dragProps = (s: Session) => ({
+    draggable: true,
+    onDragStart: (e: DragEvent) => {
+      e.dataTransfer.setData(DRAG_TYPE, s.id);
+      e.dataTransfer.effectAllowed = "move";
+    },
+    onDragEnd: () => setDropTarget(null),
+  });
+
+  // depth: 0 at the top level, +1 inside a folder, +1 inside an exam.
+  const lessonRow = (s: Session, depth = 0) => (
     <div
       key={s.id}
       role="button"
       tabIndex={0}
-      draggable
-      className={`session ${nested ? "nested" : ""} ${s.id === activeId ? "active" : ""}`}
+      className={`session depth-${depth} ${s.id === activeId ? "active" : ""}`}
       onClick={() => onSelect(s.id)}
       onKeyDown={(e) => e.key === "Enter" && onSelect(s.id)}
       onContextMenu={(e) => lessonMenu(e, s)}
-      onDragStart={(e) => {
-        e.dataTransfer.setData(DRAG_TYPE, s.id);
-        e.dataTransfer.effectAllowed = "move";
-      }}
-      onDragEnd={() => setDropTarget(null)}
+      {...(!isChild(s) && dragProps(s))}
     >
       <span className="session-title">{s.title}</span>
-      {running(s.id) ? <span className="dot-pulse small" /> : <span className="session-time">{relativeTime(s.updated_at)}</span>}
-      <button
-        className="icon-btn session-delete"
-        aria-label="Delete lesson"
-        onClick={(e) => {
-          e.stopPropagation();
-          onDelete(s.id);
-        }}
-      >
-        <Trash2 size={14} />
-      </button>
+      {running(s.id) ? (
+        <span className="dot-pulse small" />
+      ) : s.done ? (
+        <CircleCheck size={14} className="session-time session-done" aria-label="Done" />
+      ) : (
+        <span className="session-time">{relativeTime(s.updated_at)}</span>
+      )}
+      {deleteButton(s)}
     </div>
   );
 
-  const loose = sessions.filter((s) => !s.folder_id || !folders.some((f) => f.id === s.folder_id));
+  const examGroup = (s: Session, depth = 0) => {
+    const lessons = sessions.filter((c) => c.parent_id === s.id);
+    const open = !collapsed.has(s.id);
+    const done = lessons.filter((c) => c.done).length;
+    return (
+      <div key={s.id} className="exam">
+        <div
+          role="button"
+          tabIndex={0}
+          className={`session folder-row exam-row depth-${depth} ${s.id === activeId ? "active" : ""}`}
+          onClick={() => onSelect(s.id)}
+          onKeyDown={(e) => e.key === "Enter" && onSelect(s.id)}
+          onContextMenu={(e) => lessonMenu(e, s)}
+          {...dragProps(s)}
+        >
+          <button
+            className="folder-toggle"
+            aria-label={open ? "Hide lessons" : "Show lessons"}
+            aria-expanded={open}
+            onClick={(e) => {
+              e.stopPropagation();
+              toggle(s.id);
+            }}
+          >
+            <ChevronRight size={14} className={`folder-chevron ${open ? "open" : ""}`} />
+          </button>
+          <GraduationCap size={15} className="folder-icon" />
+          <span className="session-title">{s.title}</span>
+          {running(s.id) || (!open && lessons.some((c) => running(c.id))) ? (
+            <span className="dot-pulse small" />
+          ) : (
+            <span className="session-time">{lessons.length ? `${done}/${lessons.length}` : ""}</span>
+          )}
+          {deleteButton(s)}
+        </div>
+        {open && lessons.map((c) => lessonRow(c, depth + 1))}
+      </div>
+    );
+  };
+
+  const row = (s: Session, depth = 0) => (s.kind === "exam" ? examGroup(s, depth) : lessonRow(s, depth));
+  const loose = top.filter((s) => !s.folder_id || !folders.some((f) => f.id === s.folder_id));
 
   return (
     <aside className="sidebar">
       <div className="sidebar-top" data-tauri-drag-region />
-      <button className="nav-item" onClick={() => onSelect(null)}>
+      <button className="nav-item" onClick={() => onNew("lesson")}>
         <SquarePen size={16} /> New lesson
+      </button>
+      <button className="nav-item" onClick={() => onNew("exam")}>
+        <GraduationCap size={16} /> New exam
       </button>
       <div className="sidebar-label">
         <span>Lessons</span>
@@ -173,7 +251,7 @@ export default function Sidebar({ sessions, folders, activeId, running, onSelect
       </div>
       <nav className={`session-list ${dropTarget === "" ? "drop" : ""}`} {...dropProps("")}>
         {folders.map((f) => {
-          const lessons = sessions.filter((s) => s.folder_id === f.id);
+          const lessons = top.filter((s) => s.folder_id === f.id);
           const open = !collapsed.has(f.id);
           return (
             <div key={f.id} className={`folder ${dropTarget === f.id ? "drop" : ""}`} {...dropProps(f.id)}>
@@ -207,7 +285,7 @@ export default function Sidebar({ sessions, folders, activeId, running, onSelect
                 ) : (
                   <span className="session-title">{f.name}</span>
                 )}
-                {!open && lessons.some((s) => running(s.id)) ? (
+                {!open && lessons.some((s) => running(s.id) || sessions.some((c) => c.parent_id === s.id && running(c.id))) ? (
                   <span className="dot-pulse small" />
                 ) : (
                   <span className="session-time">{lessons.length || ""}</span>
@@ -217,11 +295,11 @@ export default function Sidebar({ sessions, folders, activeId, running, onSelect
                 </button>
               </div>
               {open &&
-                (lessons.length ? lessons.map((s) => lessonRow(s, true)) : <div className="folder-empty">Drag lessons here</div>)}
+                (lessons.length ? lessons.map((s) => row(s, 1)) : <div className="folder-empty">Drag lessons here</div>)}
             </div>
           );
         })}
-        {loose.map((s) => lessonRow(s))}
+        {loose.map((s) => row(s))}
       </nav>
       <button className="nav-item" onClick={onOpenSettings}>
         <SettingsIcon size={16} /> Settings

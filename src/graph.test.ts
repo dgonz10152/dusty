@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { layers, parseDeps, ranks } from "./graph.ts";
+import { latestMap, layers, parseDeps, ranks } from "./graph.ts";
 
 const node = (id: string, needs: string[] = []) => ({ id, label: id, icon: "atom", summary: "", needs });
 
@@ -28,4 +28,16 @@ test("layers pull roots down, give row-skipping edges a lane, and order rows und
   );
   assert.deepEqual(edges.find((e) => e.to === "q")!.chain, ["int", "int>q@1", "q"]);
   assert.equal(edges.length, 7);
+});
+
+test("latestMap takes the last valid deps block from the tutor", () => {
+  const block = (...ids: string[]) => "```deps\n" + JSON.stringify({ nodes: ids.map((id) => node(id)) }) + "\n```";
+  const messages = [
+    { role: "assistant", content: `Plan:\n\n${block("a")}` },
+    { role: "user", content: block("fake") },
+    { role: "assistant", content: `${block("b")}\n\nand\n\n\`\`\`deps\n{broken\n\`\`\`` },
+  ];
+  assert.deepEqual(latestMap(messages)?.map((n) => n.id), ["b"]);
+  assert.deepEqual(latestMap(messages.slice(0, 2))?.map((n) => n.id), ["a"]);
+  assert.equal(latestMap([]), null);
 });

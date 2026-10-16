@@ -1,14 +1,23 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { ArrowUp, ChevronDown, Globe, Square } from "lucide-react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { ArrowUp, ChevronDown, ChevronRight, CircleCheck, FileText, Globe, GraduationCap, Paperclip, Square, X } from "lucide-react";
 import type { ModelRef, ToolCall } from "../llm";
-import Markdown from "./Markdown";
+import Markdown, { ExamMapContext, type ExamMap } from "./Markdown";
 import { QuestionCard, QuizCard } from "./Cards";
 import { INTERACTIVE, pendingCall, type Live } from "../agent";
 import { PROVIDERS, sameModel } from "../providers";
-import type { ChatMessage } from "../db";
+import type { ChatMessage, Session } from "../db";
+import type { DepNode } from "../graph";
+import { extractText, materialError, type Material } from "../material";
 
 type Props = {
-  title?: string;
+  session?: Session;
+  /** What sending creates when no session is open yet. */
+  draftKind: Session["kind"];
+  /** The exam this lesson belongs to, if any. */
+  exam?: Session;
+  /** An exam's lessons. */
+  lessons: Session[];
+  materialNames: string[];
   messages: ChatMessage[];
   live: Live | null;
   running: boolean;
@@ -17,11 +26,14 @@ type Props = {
   models: ModelRef[];
   model: ModelRef;
   onModelChange: (model: ModelRef) => void;
-  onSend: (text: string) => void;
+  onSend: (text: string, material?: Material[]) => void;
   onStop: () => void;
   onAnswer: (call: ToolCall, content: string) => void;
   onRetry: () => void;
   onOpenSettings: () => void;
+  onStudy: (node: DepNode) => void;
+  onToggleDone: (node: DepNode) => void;
+  onOpen: (sid: string) => void;
 };
 
 function Thinking({ text, active }: { text: string; active?: boolean }) {
@@ -37,6 +49,7 @@ const WRITING: Record<string, string> = {
   quiz: "Writing a quiz",
   ask_user_question: "Writing a question",
   research: "Planning research",
+  complete_lesson: "Marking the lesson done",
 };
 
 function ToolView({ call, result, onAnswer }: { call: ToolCall; result?: string; onAnswer?: (content: string) => void }) {
@@ -57,7 +70,35 @@ function ToolView({ call, result, onAnswer }: { call: ToolCall; result?: string;
       </details>
     );
   }
+  if (call.function.name === "complete_lesson") {
+    return (
+      <div className="tool-chip">
+        <CircleCheck size={14} /> Marked done on the exam map
+      </div>
+    );
+  }
   return null;
+}
+
+type Attachment = { id: string; name: string; content?: string; error?: string };
+
+const READABLE = /\.(pdf|txt|md|markdown)$/i;
+// Pastes longer than this become an attachment instead of filling the message box.
+const LONG_PASTE = 2000;
+
+function AttachmentChip({ name, loading, error, onRemove }: { name: string; loading?: boolean; error?: string; onRemove?: () => void }) {
+  return (
+    <div className={`attachment ${error ? "failed" : ""}`} title={error ?? name}>
+      {loading ? <span className="dot-pulse small" /> : <FileText size={14} />}
+      <span className="attachment-name">{name}</span>
+      {error && <span className="attachment-error">{error}</span>}
+      {onRemove && (
+        <button className="icon-btn" aria-label={`Remove ${name}`} onClick={onRemove}>
+          <X size={12} />
+        </button>
+      )}
+    </div>
+  );
 }
 
 function Composer({
@@ -70,10 +111,23 @@ function Composer({
   onSend,
   onStop,
   autoFocus,
-}: Pick<Props, "running" | "models" | "model" | "onModelChange" | "onSend" | "onStop"> & {
+  attachments,
+  onAttach,
+  onLongPaste,
+  canSendEmpty,
+  blocked,
+}: Pick<Props, "running" | "models" | "model" | "onModelChange" | "onStop"> & {
+  onSend: (text: string) => void;
   disabled: boolean;
   placeholder: string;
   autoFocus?: boolean;
+  attachments?: ReactNode;
+  onAttach?: () => void;
+  onLongPaste?: (text: string) => void;
+  /** Sendable without text, because something is attached. */
+  canSendEmpty?: boolean;
+  /** Not sendable yet, whatever the text. */
+  blocked?: boolean;
 }) {
   const [text, setText] = useState("");
   const ref = useRef<HTMLTextAreaElement>(null);
@@ -83,7 +137,7 @@ function Composer({
     el.style.height = `${Math.min(el.scrollHeight, 240)}px`;
   }, [text]);
 
-  const canSend = !disabled && !running && text.trim().length > 0;
+  const canSend = !disabled && !running && !blocked && (text.trim().length > 0 || !!canSendEmpty);
   const send = () => {
     if (!canSend) return;
     onSend(text.trim());
@@ -94,6 +148,7 @@ function Composer({
 
   return (
     <div className={`composer ${disabled ? "disabled" : ""}`}>
+      {attachments}
       <textarea
         ref={ref}
         rows={1}
@@ -102,6 +157,13 @@ function Composer({
         disabled={disabled}
         placeholder={placeholder}
         onChange={(e) => setText(e.target.value)}
+        onPaste={(e) => {
+          const pasted = e.clipboardData.getData("text/plain");
+          if (onLongPaste && pasted.length > LONG_PASTE) {
+            e.preventDefault();
+            onLongPaste(pasted);
+          }
+        }}
         onKeyDown={(e) => {
           if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
             e.preventDefault();
@@ -110,27 +172,34 @@ function Composer({
         }}
       />
       <div className="composer-bar">
-        <label className="model-picker">
-          <select
-            value={options.findIndex((m) => sameModel(m, model))}
-            onChange={(e) => onModelChange(options[Number(e.target.value)])}
-            aria-label="Model"
-          >
-            {PROVIDERS.filter((p) => options.some((m) => m.provider === p.id)).map((p) => (
-              <optgroup key={p.id} label={p.label}>
-                {options.map((m, i) =>
-                  m.provider === p.id ? (
-                    <option key={i} value={i}>
-                      {m.model}
-                    </option>
-                  ) : null,
-                )}
-              </optgroup>
-            ))}
-          </select>
-          <span>{label(model)}</span>
-          <ChevronDown size={14} />
-        </label>
+        <div className="composer-tools">
+          {onAttach && (
+            <button className="icon-btn attach-btn" aria-label="Add files" title="Add PDFs, .txt, or .md files" onClick={onAttach}>
+              <Paperclip size={16} />
+            </button>
+          )}
+          <label className="model-picker">
+            <select
+              value={options.findIndex((m) => sameModel(m, model))}
+              onChange={(e) => onModelChange(options[Number(e.target.value)])}
+              aria-label="Model"
+            >
+              {PROVIDERS.filter((p) => options.some((m) => m.provider === p.id)).map((p) => (
+                <optgroup key={p.id} label={p.label}>
+                  {options.map((m, i) =>
+                    m.provider === p.id ? (
+                      <option key={i} value={i}>
+                        {m.model}
+                      </option>
+                    ) : null,
+                  )}
+                </optgroup>
+              ))}
+            </select>
+            <span>{label(model)}</span>
+            <ChevronDown size={14} />
+          </label>
+        </div>
         {running ? (
           <button className="send-btn" aria-label="Stop" onClick={onStop}>
             <Square size={12} fill="currentColor" />
@@ -146,34 +215,114 @@ function Composer({
 }
 
 export default function Chat(props: Props) {
-  const { title, messages, live, running, error, setupHint, onAnswer, onRetry, onOpenSettings } = props;
+  const { session, draftKind, exam, lessons, materialNames, messages, live, running, error, setupHint, onAnswer, onRetry, onOpenSettings } = props;
   const scroller = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [dragging, setDragging] = useState(false);
 
   useEffect(() => {
     const el = scroller.current;
     if (el && stick.current) el.scrollTop = el.scrollHeight;
   }, [messages, live]);
 
+  const patch = (id: string, a: Partial<Attachment>) => setAttachments((list) => list.map((x) => (x.id === id ? { ...x, ...a } : x)));
+  function attach(files: File[]) {
+    for (const file of files) {
+      const id = crypto.randomUUID();
+      if (!READABLE.test(file.name)) {
+        setAttachments((list) => [...list, { id, name: file.name, error: "Only PDF, .txt, and .md files" }]);
+        continue;
+      }
+      setAttachments((list) => [...list, { id, name: file.name }]);
+      extractText(file).then(
+        (content) => patch(id, content.replace(/--- Page \d+ ---/g, "").trim() ? { content } : { error: "No text found. Is it a scanned PDF?" }),
+        () => patch(id, { error: "Couldn't read this file" }),
+      );
+    }
+  }
+  function attachText(content: string) {
+    setAttachments((list) => {
+      const n = list.filter((a) => a.name.startsWith("Pasted text")).length;
+      return [...list, { id: crypto.randomUUID(), name: n ? `Pasted text ${n + 1}` : "Pasted text", content }];
+    });
+  }
+
+  const material: Material[] = attachments.filter((a) => a.content).map((a) => ({ name: a.name, content: a.content! }));
+  const loading = attachments.some((a) => a.content === undefined && !a.error);
+  const sizeError = materialError(material);
+
+  const examMap = useMemo<ExamMap | null>(
+    () =>
+      session?.kind === "exam"
+        ? {
+            statusOf: (id) => {
+              const lesson = lessons.find((s) => s.node_id === id);
+              return !lesson ? "todo" : lesson.done ? "done" : "started";
+            },
+            onStudy: props.onStudy,
+            onToggleDone: props.onToggleDone,
+          }
+        : null,
+    [session?.kind, lessons, props.onStudy, props.onToggleDone],
+  );
+
   const pending = pendingCall(messages);
   const waitingOnStudent = !running && !!pending && INTERACTIVE.has(pending.function.name);
+  const drafting = !session && draftKind === "exam";
   const composer = (
     <Composer
       {...props}
       autoFocus
       disabled={waitingOnStudent}
-      placeholder={waitingOnStudent ? "Answer the question above to continue" : messages.length ? "Reply to Dusty" : "Ask Dusty to teach you anything"}
+      placeholder={
+        waitingOnStudent
+          ? "Answer the question above to continue"
+          : messages.length
+            ? "Reply to Dusty"
+            : drafting
+              ? "Which exam is it? Add your material with the paperclip, or drop files here"
+              : "Ask Dusty to teach you anything"
+      }
       onSend={(text) => {
         stick.current = true;
-        props.onSend(text);
+        props.onSend(text, drafting ? material : undefined);
       }}
+      {...(drafting && {
+        attachments: attachments.length > 0 && (
+          <div className="attachments">
+            {attachments.map((a) => (
+              <AttachmentChip
+                key={a.id}
+                name={a.name}
+                loading={a.content === undefined && !a.error}
+                error={a.error}
+                onRemove={() => setAttachments((list) => list.filter((x) => x.id !== a.id))}
+              />
+            ))}
+          </div>
+        ),
+        onAttach: () => fileInput.current?.click(),
+        onLongPaste: attachText,
+        canSendEmpty: material.length > 0,
+        blocked: loading || !!sizeError,
+      })}
     />
   );
 
+  const firstUser = messages.findIndex((m) => m.role === "user");
   const items = messages.map((m, i) => {
     if (m.role === "user") {
       return (
         <div key={m.id} className="msg user">
+          {i === firstUser && materialNames.length > 0 && (
+            <div className="attachments sent">
+              {materialNames.map((name, k) => (
+                <AttachmentChip key={k} name={name} />
+              ))}
+            </div>
+          )}
           <div className="bubble">{m.content}</div>
         </div>
       );
@@ -200,20 +349,67 @@ export default function Chat(props: Props) {
   return (
     <main className="main">
       <header className="main-header" data-tauri-drag-region>
+        {exam && (
+          <>
+            <button className="crumb" onClick={() => props.onOpen(exam.id)}>
+              <GraduationCap size={14} />
+              <span>{exam.title}</span>
+            </button>
+            <ChevronRight size={14} className="crumb-sep" />
+          </>
+        )}
         <span className="main-title" data-tauri-drag-region>
-          {title}
+          {session?.title}
         </span>
       </header>
       {messages.length === 0 ? (
-        <div className="empty">
-          <h1>What do you want to learn?</h1>
-          <p className="muted">Dusty finds what you already know, plans a path, then teaches it so it sticks.</p>
+        <div
+          className={`empty ${dragging ? "dragging" : ""}`}
+          {...(drafting && {
+            onDragOver: (e: React.DragEvent) => {
+              if (!e.dataTransfer.types.includes("Files")) return;
+              e.preventDefault();
+              e.dataTransfer.dropEffect = "copy";
+              setDragging(true);
+            },
+            onDragLeave: (e: React.DragEvent) => {
+              if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragging(false);
+            },
+            onDrop: (e: React.DragEvent) => {
+              e.preventDefault();
+              setDragging(false);
+              attach([...e.dataTransfer.files]);
+            },
+          })}
+        >
+          <h1>{drafting ? "What's your exam on?" : "What do you want to learn?"}</h1>
+          <p className="muted">
+            {drafting
+              ? "Add your slides, notes, or study guide. Dusty maps every concept on the exam, then teaches each one as its own lesson."
+              : "Dusty finds what you already know, plans a path, then teaches it so it sticks."}
+          </p>
           {setupHint && (
             <button className="notice" onClick={onOpenSettings}>
               {setupHint}
             </button>
           )}
-          <div className="empty-composer">{composer}</div>
+          <div className="empty-composer">
+            {composer}
+            {drafting && sizeError && <div className="composer-error">{sizeError}</div>}
+          </div>
+          {drafting && (
+            <input
+              ref={fileInput}
+              type="file"
+              multiple
+              hidden
+              accept=".pdf,.txt,.md,.markdown"
+              onChange={(e) => {
+                attach([...(e.currentTarget.files ?? [])]);
+                e.currentTarget.value = "";
+              }}
+            />
+          )}
         </div>
       ) : (
         <>
@@ -225,32 +421,38 @@ export default function Chat(props: Props) {
               stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
             }}
           >
-            <div className="thread">
-              {items}
-              {live?.status && (
-                <div className="msg assistant">
-                  <div className="tool-chip shimmer">
-                    <Globe size={14} /> {live.status}
+            <ExamMapContext value={examMap}>
+              <div className="thread">
+                {items}
+                {live?.status && (
+                  <div className="msg assistant">
+                    <div className="tool-chip shimmer">
+                      <Globe size={14} /> {live.status}
+                    </div>
                   </div>
-                </div>
-              )}
-              {live && !live.status && (
-                <div className="msg assistant">
-                  {live.thinking && <Thinking text={live.thinking} active={!live.content} />}
-                  {live.content && <Markdown text={live.content} streaming />}
-                  {live.tool && <div className="tool-chip shimmer">{WRITING[live.tool] ?? `Calling ${live.tool}`}</div>}
-                </div>
-              )}
-              {running && !live && <div className="msg assistant"><span className="dot-pulse" /></div>}
-              {error && (
-                <div className="error-banner">
-                  <span>{error}</span>
-                  <button className="btn ghost" onClick={onRetry}>
-                    Retry
-                  </button>
-                </div>
-              )}
-            </div>
+                )}
+                {live && !live.status && (
+                  <div className="msg assistant">
+                    {live.thinking && <Thinking text={live.thinking} active={!live.content} />}
+                    {live.content && <Markdown text={live.content} streaming />}
+                    {live.tool && <div className="tool-chip shimmer">{WRITING[live.tool] ?? `Calling ${live.tool}`}</div>}
+                  </div>
+                )}
+                {running && !live && (
+                  <div className="msg assistant">
+                    <span className="dot-pulse" />
+                  </div>
+                )}
+                {error && (
+                  <div className="error-banner">
+                    <span>{error}</span>
+                    <button className="btn ghost" onClick={onRetry}>
+                      Retry
+                    </button>
+                  </div>
+                )}
+              </div>
+            </ExamMapContext>
           </div>
           <div className="composer-dock">{composer}</div>
         </>

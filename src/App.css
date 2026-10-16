@@ -211,8 +211,36 @@ button:disabled {
   display: flex;
 }
 
-.session.nested {
+.session.depth-1 {
   padding-left: 32px;
+}
+
+.session.depth-2 {
+  padding-left: 54px;
+}
+
+.folder-row.depth-1 {
+  padding-left: 28px;
+}
+
+.folder-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  margin: 0 -3px;
+  border-radius: 5px;
+}
+
+.folder-toggle:hover {
+  background: var(--bg-active);
+}
+
+.session-done {
+  flex-shrink: 0;
+  margin-right: 4px;
+  color: var(--green);
 }
 
 .session-list.drop,
@@ -295,6 +323,40 @@ button:disabled {
   padding: 0 20px;
 }
 
+.crumb {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 40%;
+  height: 28px;
+  margin-left: -8px;
+  padding: 0 8px;
+  border-radius: 8px;
+  color: var(--text-muted);
+}
+
+.crumb span {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.crumb:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.crumb svg {
+  flex-shrink: 0;
+}
+
+.crumb-sep {
+  flex-shrink: 0;
+  margin: 0 4px 0 2px;
+  color: var(--text-faint);
+}
+
 .main-title {
   font-weight: 500;
   overflow: hidden;
@@ -347,6 +409,17 @@ button:disabled {
   text-align: left;
 }
 
+.empty.dragging .composer {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+.composer-error {
+  margin: 10px 16px 0;
+  font-size: 13px;
+  color: var(--red);
+}
+
 .notice {
   margin-top: 20px;
   padding: 8px 14px;
@@ -359,7 +432,9 @@ button:disabled {
 
 .msg.user {
   display: flex;
-  justify-content: flex-end;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
 }
 
 .bubble {
@@ -754,6 +829,32 @@ div.tool-chip {
   color: var(--text-faint);
 }
 
+.dep-status {
+  flex-shrink: 0;
+  color: var(--accent);
+}
+
+.dep-card.done {
+  border-color: color-mix(in srgb, var(--green) 45%, transparent);
+}
+
+.dep-card.done .dep-status {
+  color: var(--green);
+}
+
+.dep-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.btn.small {
+  height: 28px;
+  padding: 0 10px;
+  font-size: 13px;
+}
+
 .dep-summary {
   padding: 10px 12px 12px;
   border-top: 1px solid var(--border);
@@ -986,6 +1087,67 @@ div.tool-chip {
   border-color: var(--border);
 }
 
+.attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: -2px -4px 10px;
+}
+
+.attachments.sent {
+  justify-content: flex-end;
+  max-width: 80%;
+  margin: 0;
+}
+
+.attachment {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 260px;
+  height: 30px;
+  padding: 0 4px 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-subtle);
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.attachments.sent .attachment {
+  padding-right: 10px;
+}
+
+.attachment > svg,
+.attachment > .dot-pulse {
+  flex-shrink: 0;
+}
+
+.attachment-name {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--text);
+}
+
+.attachment.failed {
+  max-width: 100%;
+  border-color: color-mix(in srgb, var(--red) 30%, transparent);
+  background: var(--red-bg);
+}
+
+.attachment-error {
+  flex-shrink: 0;
+  color: var(--red);
+}
+
+.attachment .icon-btn {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+}
+
 .composer textarea {
   border: none;
   outline: none;
@@ -1005,6 +1167,24 @@ div.tool-chip {
   align-items: center;
   justify-content: space-between;
   margin-top: 8px;
+}
+
+.composer-tools {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.attach-btn {
+  width: 28px;
+  height: 28px;
+  margin-left: -6px;
+  border-radius: 8px;
+}
+
+.attach-btn + .model-picker {
+  margin-left: 0;
 }
 
 .model-picker {

@@ -1,6 +1,8 @@
-import { addMessage, getMessages, getSetting } from "./db";
+import { addMessage, getMaterial, getMessages, getSession, getSetting, listSessions, setDone } from "./db";
+import { latestMap } from "./graph";
 import type { Message, Tool, ToolCall } from "./llm";
-import { EMPTY_PROFILE, RESEARCHER, teacherPrompt, type Profile } from "./prompts";
+import { materialMessage, type Material } from "./material";
+import { childContext, EMPTY_PROFILE, examPrompt, RESEARCHER, teacherPrompt, type Profile } from "./prompts";
 import { getProvider, readModel } from "./providers";
 import { salvageToolCall } from "./quiz";
 
@@ -18,43 +20,64 @@ const optionsSchema = {
   items: { type: "object", properties: { label: { type: "string" }, value: { type: "string" } }, required: ["label", "value"] },
 };
 
-const TEACHER_TOOLS: Tool[] = [
-  fn(
-    "quiz",
-    "Ask the student a GRADED multiple-choice question with a known correct answer. The app grades it, reveals the answer and your explanation, and returns the result (correct / wrong / dont_know, plus an optional note). Use it to probe their level and to check each node landed. An 'I don't know' choice is added automatically - never add your own.",
-    {
-      question: { type: "string" },
-      details: { type: "string", description: "Optional context shown under the question." },
-      options: optionsSchema,
-      correctAnswer: {
-        type: ["string", "array"],
-        items: { type: "string" },
-        description: "The `value` of the correct option, or an array of values when multiSelect is true.",
-      },
-      explanation: { type: "string", description: "Why the correct answer is correct. Shown only after they answer." },
-      multiSelect: { type: "boolean", description: "True only when more than one option is correct." },
-      shuffle: { type: "boolean", description: "Defaults to true. Set false only when option order is meaningful." },
+const QUIZ = fn(
+  "quiz",
+  "Ask the student a GRADED multiple-choice question with a known correct answer. The app grades it, reveals the answer and your explanation, and returns the result (correct / wrong / dont_know, plus an optional note). Use it to probe their level and to check each node landed. An 'I don't know' choice is added automatically - never add your own.",
+  {
+    question: { type: "string" },
+    details: { type: "string", description: "Optional context shown under the question." },
+    options: optionsSchema,
+    correctAnswer: {
+      type: ["string", "array"],
+      items: { type: "string" },
+      description: "The `value` of the correct option, or an array of values when multiSelect is true.",
     },
-    ["question", "options", "correctAnswer", "explanation"],
-  ),
-  fn(
-    "ask_user_question",
-    "Ask the student an UNGRADED question: their goal, a preference, a direction, or okaying the plan. With options they pick (and can add their own text); without options it's free text.",
-    {
-      question: { type: "string" },
-      details: { type: "string", description: "Optional context shown under the question." },
-      options: optionsSchema,
-      multiSelect: { type: "boolean" },
-    },
-    ["question"],
-  ),
-  fn(
-    "research",
-    "Verify facts or scope a topic. A research assistant searches the web and returns a sourced brief. It has no access to this conversation, so the question must be self-contained.",
-    { question: { type: "string" } },
-    ["question"],
-  ),
-];
+    explanation: { type: "string", description: "Why the correct answer is correct. Shown only after they answer." },
+    multiSelect: { type: "boolean", description: "True only when more than one option is correct." },
+    shuffle: { type: "boolean", description: "Defaults to true. Set false only when option order is meaningful." },
+  },
+  ["question", "options", "correctAnswer", "explanation"],
+);
+
+const ASK = fn(
+  "ask_user_question",
+  "Ask the student an UNGRADED question: their goal, a preference, a direction, or okaying the plan. With options they pick (and can add their own text); without options it's free text.",
+  {
+    question: { type: "string" },
+    details: { type: "string", description: "Optional context shown under the question." },
+    options: optionsSchema,
+    multiSelect: { type: "boolean" },
+  },
+  ["question"],
+);
+
+const RESEARCH = fn(
+  "research",
+  "Verify facts or scope a topic. A research assistant searches the web and returns a sourced brief. It has no access to this conversation, so the question must be self-contained.",
+  { question: { type: "string" } },
+  ["question"],
+);
+
+const COMPLETE = fn(
+  "complete_lesson",
+  "Mark this lesson done on the student's exam map. Call it once, right after the final quiz-check of this lesson's concept lands.",
+  {},
+  [],
+);
+
+const TEACHER_TOOLS = [QUIZ, ASK, RESEARCH];
+
+/** The prompt, tools, and course material a session runs with: a plain lesson, an exam, or one of an exam's lessons. */
+async function setup(sessionId: string): Promise<{ system: string; tools: Tool[]; material: Material[] }> {
+  const profile = await getSetting<Profile>("profile", EMPTY_PROFILE);
+  const session = await getSession(sessionId);
+  if (session?.kind === "exam") return { system: examPrompt(profile), tools: [ASK, RESEARCH], material: await getMaterial(sessionId) };
+  const exam = session?.parent_id ? await getSession(session.parent_id) : undefined;
+  if (!exam) return { system: teacherPrompt(profile), tools: TEACHER_TOOLS, material: [] };
+  const done = new Set((await listSessions()).filter((s) => s.parent_id === exam.id && s.done && s.node_id).map((s) => s.node_id!));
+  const context = childContext(exam.title, latestMap(await getMessages(exam.id)), session!.node_id, done);
+  return { system: `${teacherPrompt(profile)}\n\n${context}`, tools: [...TEACHER_TOOLS, COMPLETE], material: await getMaterial(exam.id) };
+}
 
 /** A turn in progress. `tool` is a tool call the model has started writing but not finished. */
 export type Live = { content: string; thinking: string; status?: string; tool?: string };
@@ -89,7 +112,9 @@ export async function runAgent(
 ) {
   const { provider: providerId, model } = await readModel();
   const provider = getProvider(providerId);
-  const system = teacherPrompt(await getSetting<Profile>("profile", EMPTY_PROFILE));
+  const { system, tools, material } = await setup(sessionId);
+  // The material is sent ahead of the conversation on every turn but never stored in it.
+  const preamble: Message[] = material.length ? [{ role: "user", content: materialMessage(material) }] : [];
   try {
     for (;;) {
       const messages = await getMessages(sessionId);
@@ -106,6 +131,9 @@ export async function runAgent(
             if (signal.aborted) throw e;
             content = `Research failed: ${e instanceof Error ? e.message : String(e)}`;
           }
+        } else if (call.function.name === "complete_lesson") {
+          await setDone(sessionId, true);
+          content = "Marked done on the exam map.";
         } else {
           content = `Unknown tool: ${call.function.name}`;
         }
@@ -121,8 +149,8 @@ export async function runAgent(
           await provider.chat({
             model,
             system,
-            messages,
-            tools: TEACHER_TOOLS,
+            messages: [...preamble, ...messages],
+            tools,
             signal,
             onDelta: (m) => {
               partial = m;

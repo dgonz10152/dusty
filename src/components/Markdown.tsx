@@ -1,5 +1,5 @@
-import { memo, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { createContext, memo, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { ChevronDown, ChevronRight, CircleCheck, CircleDot } from "lucide-react";
 import { DynamicIcon, iconNames, type IconName } from "lucide-react/dynamic";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -8,7 +8,20 @@ import rehypeKatex from "rehype-katex";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import "katex/dist/katex.min.css";
 import { normalizeMath, rehypeMathPunctuation } from "../math";
-import { layers, parseDeps } from "../graph";
+import { layers, parseDeps, type DepNode } from "../graph";
+
+export type LessonStatus = "todo" | "started" | "done";
+
+/** In an exam session, every map node is a lesson the student can open and check off. */
+export type ExamMap = {
+  statusOf: (nodeId: string) => LessonStatus;
+  onStudy: (node: DepNode) => void;
+  onToggleDone: (node: DepNode) => void;
+};
+
+export const ExamMapContext = createContext<ExamMap | null>(null);
+
+const STATUS_LABEL: Record<LessonStatus, string> = { todo: "Not started", started: "In progress", done: "Done" };
 
 // Loaded on first diagram; mermaid is the heaviest dependency by far.
 async function renderMermaid(id: string, code: string) {
@@ -75,6 +88,7 @@ function DepGraph({ code }: { code: string }) {
       return null;
     }
   }, [code]);
+  const exam = useContext(ExamMapContext);
   const [open, setOpen] = useState<string | null>(null);
   const [edges, setEdges] = useState<DrawnEdge[]>([]);
   const canvas = useRef<HTMLDivElement>(null);
@@ -147,17 +161,34 @@ function DepGraph({ code }: { code: string }) {
               if (n.via) return <div key={n.id} data-id={n.id} className="dep-via" />;
               const isOpen = open === n.id;
               const Chevron = isOpen ? ChevronDown : ChevronRight;
+              const status = exam?.statusOf(n.id);
+              const Mark = status === "done" ? CircleCheck : status === "started" ? CircleDot : null;
               return (
-                <div key={n.id} data-id={n.id} className={`dep-card${isOpen ? " open" : ""}`}>
+                <div key={n.id} data-id={n.id} className={`dep-card${isOpen ? " open" : ""}${status ? ` ${status}` : ""}`}>
                   <button className="dep-head" aria-expanded={isOpen} onClick={() => setOpen(isOpen ? null : n.id)}>
                     <DynamicIcon name={(ICONS.has(n.icon) ? n.icon : "circle-dot") as IconName} size={16} className="dep-icon" />
                     <span className="dep-label">{n.label}</span>
+                    {Mark && <Mark size={14} className="dep-status" aria-label={STATUS_LABEL[status!]} />}
                     <Chevron size={14} className="dep-chevron" />
                   </button>
-                  {isOpen && n.summary && (
+                  {isOpen && (n.summary || exam) && (
                     <div className="dep-summary">
-                      <div className="dep-kind">Summary</div>
-                      <Markdown text={n.summary} />
+                      {n.summary && (
+                        <>
+                          <div className="dep-kind">Summary</div>
+                          <Markdown text={n.summary} />
+                        </>
+                      )}
+                      {exam && status && (
+                        <div className="dep-actions">
+                          <button className="btn primary small" onClick={() => exam.onStudy(n)}>
+                            {status === "todo" ? "Start lesson" : "Open lesson"}
+                          </button>
+                          <button className="btn ghost small" onClick={() => exam.onToggleDone(n)}>
+                            {status === "done" ? "Mark not done" : "Mark done"}
+                          </button>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

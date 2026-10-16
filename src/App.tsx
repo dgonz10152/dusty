@@ -5,13 +5,18 @@ import Settings from "./components/Settings";
 import Sidebar from "./components/Sidebar";
 import { addUserMessage, runAgent, type Live } from "./agent";
 import { DEFAULT_MODEL, getProvider, listAllModels, readModel } from "./providers";
+import type { DepNode } from "./graph";
+import type { Material } from "./material";
 import {
+  addMaterial,
   addMessage,
   createSession,
   deleteSession,
+  getMaterialNames,
   getMessages,
   listFolders,
   listSessions,
+  setDone,
   setSetting,
   type ChatMessage,
   type Folder,
@@ -34,6 +39,9 @@ export default function App() {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [folders, setFolders] = useState<Folder[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
+  // What "send" creates while no session is open.
+  const [draftKind, setDraftKind] = useState<Session["kind"]>("lesson");
+  const [materialNames, setMaterialNames] = useState<string[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [runs, setRuns] = useState<Record<string, Run>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -64,11 +72,15 @@ export default function App() {
     loadConfig();
   }, [refreshSessions, loadConfig]);
 
-  function select(sid: string | null) {
+  function select(sid: string | null, kind: Session["kind"] = "lesson") {
     activeRef.current = sid;
     setActiveId(sid);
-    if (sid) reloadMessages(sid);
-    else setMessages([]);
+    setDraftKind(kind);
+    setMaterialNames([]);
+    if (sid) {
+      reloadMessages(sid);
+      getMaterialNames(sid).then((names) => activeRef.current === sid && setMaterialNames(names));
+    } else setMessages([]);
   }
 
   function setError(sid: string, error?: string) {
@@ -95,12 +107,15 @@ export default function App() {
       });
   }
 
-  async function send(text: string) {
+  async function send(text: string, material: Material[] = []) {
     let sid = activeId;
     if (!sid) {
       // ponytail: title is the first message; ask the model for a title if these read badly
-      sid = (await createSession(text.length > 60 ? `${text.slice(0, 57)}...` : text)).id;
-      select(sid);
+      const title = text || material[0]?.name || "Exam";
+      sid = (await createSession(title.length > 60 ? `${title.slice(0, 57)}...` : title, { kind: draftKind })).id;
+      for (const m of material) await addMaterial(sid, m);
+      select(sid, draftKind);
+      text ||= "Here's what my exam covers.";
     }
     await addUserMessage(sid, text);
     await reloadMessages(sid);
@@ -115,6 +130,27 @@ export default function App() {
     start(sid);
   }
 
+  /** Opens the exam lesson for a map node, creating and starting it the first time. */
+  async function study(exam: Session, node: DepNode) {
+    let child = sessions.find((s) => s.parent_id === exam.id && s.node_id === node.id);
+    child ??= await createSession(node.label, { parent_id: exam.id, node_id: node.id });
+    select(child.id);
+    // A lesson marked done before it was ever opened has no messages yet.
+    if ((await getMessages(child.id)).length === 0) {
+      await addUserMessage(child.id, `Teach me ${node.label} for ${exam.title}.`);
+      await reloadMessages(child.id);
+      start(child.id);
+    }
+    refreshSessions();
+  }
+
+  async function toggleDone(exam: Session, node: DepNode) {
+    const child = sessions.find((s) => s.parent_id === exam.id && s.node_id === node.id);
+    if (child) await setDone(child.id, !child.done);
+    else await setDone((await createSession(node.label, { parent_id: exam.id, node_id: node.id })).id, true);
+    refreshSessions();
+  }
+
   async function remove(sid: string) {
     runs[sid]?.controller.abort();
     await deleteSession(sid);
@@ -123,6 +159,7 @@ export default function App() {
   }
 
   const run = activeId ? runs[activeId] : undefined;
+  const session = sessions.find((s) => s.id === activeId);
 
   return (
     <div className="app">
@@ -132,13 +169,18 @@ export default function App() {
         activeId={activeId}
         running={(sid) => !!runs[sid]}
         onSelect={select}
+        onNew={(kind) => select(null, kind)}
         onDelete={remove}
         onChange={refreshSessions}
         onOpenSettings={() => setSettingsOpen(true)}
       />
       <Chat
-        key={activeId ?? "new"}
-        title={sessions.find((s) => s.id === activeId)?.title}
+        key={activeId ?? `new-${draftKind}`}
+        session={session}
+        draftKind={draftKind}
+        exam={sessions.find((s) => s.id === session?.parent_id)}
+        lessons={sessions.filter((s) => s.parent_id === activeId)}
+        materialNames={materialNames}
         messages={messages}
         live={run?.live ?? null}
         running={!!run}
@@ -152,6 +194,9 @@ export default function App() {
           loadConfig();
         }}
         onSend={send}
+        onStudy={(node) => session && study(session, node)}
+        onToggleDone={(node) => session && toggleDone(session, node)}
+        onOpen={select}
         onStop={() => run?.controller.abort()}
         onAnswer={answer}
         onRetry={() => activeId && start(activeId)}

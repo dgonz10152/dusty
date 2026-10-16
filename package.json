@@ -19,6 +19,7 @@
     "lucide-react": "^1.57.0",
     "mermaid": "^12.2.0",
     "ollama": "^0.6.4",
+    "pdfjs-dist": "6.4.299",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-markdown": "^10.1.0",

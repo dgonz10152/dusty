@@ -80,3 +80,20 @@ export function ranks(nodes: DepNode[]): Map<string, number> {
   nodes.forEach((n) => visit(n.id));
   return rank;
 }
+
+const DEPS_BLOCK = /```deps[ \t]*\n([\s\S]*?)\n[ \t]*```/g;
+
+/** An exam's current map: the last valid ```deps block the tutor wrote. */
+export function latestMap(messages: { role: string; content: string }[]): DepNode[] | null {
+  for (const m of messages.toReversed()) {
+    if (m.role !== "assistant") continue;
+    for (const [, code] of [...m.content.matchAll(DEPS_BLOCK)].reverse()) {
+      try {
+        return parseDeps(code);
+      } catch {
+        // A broken block shows as code in the chat; fall back to the one before it.
+      }
+    }
+  }
+  return null;
+}

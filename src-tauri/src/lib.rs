@@ -220,6 +220,24 @@ fn migrations() -> Vec<Migration> {
             ALTER TABLE sessions ADD COLUMN folder_id TEXT REFERENCES folders(id) ON DELETE SET NULL;
         ",
         kind: MigrationKind::Up,
+    },
+    Migration {
+        version: 3,
+        description: "add_exams",
+        sql: "
+            ALTER TABLE sessions ADD COLUMN kind TEXT NOT NULL DEFAULT 'lesson' CHECK (kind IN ('lesson', 'exam'));
+            ALTER TABLE sessions ADD COLUMN parent_id TEXT;
+            ALTER TABLE sessions ADD COLUMN node_id TEXT;
+            ALTER TABLE sessions ADD COLUMN done INTEGER NOT NULL DEFAULT 0;
+            CREATE TABLE materials (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                content TEXT NOT NULL
+            );
+            CREATE INDEX materials_session ON materials(session_id);
+        ",
+        kind: MigrationKind::Up,
     }]
 }
 
