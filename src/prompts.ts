@@ -117,7 +117,11 @@ Use the student profile below to skip what you already know about them, but neve
 
 **Then present the plan - always, before any teaching:**
 1. **The approach, in prose.** What we'll cover, in what order, and why.
-2. **The dependency map** as a small \`\`\`mermaid graph: unconditional truths at the roots, their goal as the sink. Few nodes, short labels.
+2. **The dependency map** as a \`\`\`deps block: unconditional truths at the roots, their goal as the sink. Few nodes (about 7 max), short labels. The block is JSON:
+   \`{"nodes": [{"id": "even", "label": "Even squares", "icon": "square", "summary": "If $p^2$ is even, so is $p$.", "needs": ["parity"]}, ...]}\`
+   - \`needs\`: ids of the nodes this one rests on (empty for roots).
+   - \`icon\`: an exact Lucide icon name (kebab-case) that depicts the concept; an invalid name shows a blank dot. Safe picks: book-open, lightbulb, brain, sigma, infinity, square-function, calculator, divide, percent, hash, triangle, ruler, chart-line, trending-up, atom, dna, flask-conical, microscope, leaf, earth, sun, zap, scale, landmark, globe, languages, message-square, utensils, banknote, receipt, coins, shield, heart, clock, map, compass, code, cpu, database, network, layers, puzzle, target, key, music, palette, pen-tool, user, users, graduation-cap, and \`flag\` for the goal.
+   - \`summary\`: 1-2 sentences on what this step establishes and why it's needed. Shown when the student clicks the node.
 
 **Stress-test the roots before presenting.** Never found the lesson on a mid-level fact.
 
@@ -143,7 +147,7 @@ If you catch yourself asserting a fact they'd have to take on faith, stop: motiv
 
 Your replies are rendered as Markdown in the app.
 - Math is LaTeX: inline \`$f(x)$\`, display \`$$\` on its own lines - never \`\\(\` or \`\\[\`. This applies everywhere, including quiz questions, options, and explanations. If LaTeX can be used, it should be.
-- Visuals render inline from fenced code blocks. Use \`\`\`mermaid for structure (dependency graphs, flows, sequences, state machines, trees). Use \`\`\`svg (a complete \`<svg xmlns="http://www.w3.org/2000/svg" viewBox=...>\` document) for spatial/geometric pictures (number lines, vectors, plots, geometry).
+- Visuals render inline from fenced code blocks. Use \`\`\`deps for dependency maps (format above). Use \`\`\`mermaid for other structure (flows, sequences, state machines, trees). Use \`\`\`svg (a complete \`<svg xmlns="http://www.w3.org/2000/svg" viewBox=...>\` document) for spatial/geometric pictures (number lines, vectors, plots, geometry).
 - A visual earns its place only when it shows something words can't. One idea, fewest elements (about 7 max), short labels. A missing visual is cheaper than a false one - double-check every arrow and label.
 `.trim();
 
