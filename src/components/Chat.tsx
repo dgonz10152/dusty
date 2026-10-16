@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ArrowUp, ChevronDown, ChevronRight, CircleCheck, FileText, Globe, GraduationCap, ImageIcon, Paperclip, Square, X } from "lucide-react";
 import type { ModelRef, ToolCall } from "../llm";
-import Markdown, { ExamMapContext, type ExamMap } from "./Markdown";
+import Markdown, { ExamMapContext, InlineMath, type ExamMap } from "./Markdown";
 import { QuestionCard, QuizCard } from "./Cards";
 import { INTERACTIVE, pendingCall, transcribeImage, type Live } from "../agent";
 import { PROVIDERS, sameModel } from "../providers";
@@ -366,13 +366,15 @@ export default function Chat(props: Props) {
           <>
             <button className="crumb" onClick={() => props.onOpen(exam.id)}>
               <GraduationCap size={14} />
-              <span>{exam.title}</span>
+              <span>
+                <InlineMath text={exam.title} />
+              </span>
             </button>
             <ChevronRight size={14} className="crumb-sep" />
           </>
         )}
         <span className="main-title" data-tauri-drag-region>
-          {session?.title}
+          {session && <InlineMath text={session.title} />}
         </span>
       </header>
       {messages.length === 0 ? (

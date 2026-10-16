@@ -6,6 +6,7 @@ import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import katex from "katex";
 import "katex/dist/katex.min.css";
 import { normalizeMath, rehypeMathPunctuation } from "../math";
 import { layers, parseDeps, type DepNode } from "../graph";
@@ -65,6 +66,19 @@ function Mermaid({ code }: { code: string }) {
   if (failed) return <CodeBlock code={code} lang="mermaid" />;
   if (!svg) return <div className="visual visual-loading" />;
   return <div className="visual" dangerouslySetInnerHTML={{ __html: svg }} />;
+}
+
+/**
+ * A one-line label or title with its $...$ math typeset and everything else as plain text. Full Markdown would
+ * turn a title like "1. Limits" into a list.
+ */
+export function InlineMath({ text }: { text: string }) {
+  const parts = normalizeMath(text).split(/(\$\$[^$]+\$\$|\$[^$\n]+\$)/);
+  return parts.map((part, i) => {
+    if (i % 2 === 0) return part;
+    const tex = part.replace(/^\$+|\$+$/g, "");
+    return <span key={i} dangerouslySetInnerHTML={{ __html: katex.renderToString(tex, { throwOnError: false }) }} />;
+  });
 }
 
 const ICONS = new Set<string>(iconNames);
@@ -167,7 +181,9 @@ function DepGraph({ code }: { code: string }) {
                 <div key={n.id} data-id={n.id} className={`dep-card${isOpen ? " open" : ""}${status ? ` ${status}` : ""}`}>
                   <button className="dep-head" aria-expanded={isOpen} onClick={() => setOpen(isOpen ? null : n.id)}>
                     <DynamicIcon name={(ICONS.has(n.icon) ? n.icon : "circle-dot") as IconName} size={16} className="dep-icon" />
-                    <span className="dep-label">{n.label}</span>
+                    <span className="dep-label">
+                      <InlineMath text={n.label} />
+                    </span>
                     {Mark && <Mark size={14} className="dep-status" aria-label={STATUS_LABEL[status!]} />}
                     <Chevron size={14} className="dep-chevron" />
                   </button>

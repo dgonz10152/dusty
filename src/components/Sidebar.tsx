@@ -13,6 +13,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
+import { InlineMath } from "./Markdown";
 import { createFolder, deleteFolder, moveSession, renameFolder, searchSessions, type Folder, type Session } from "../db";
 
 const DRAG_TYPE = "application/x-dusty-lesson";
@@ -196,7 +197,9 @@ export default function Sidebar({ sessions, folders, activeId, running, onSelect
       onContextMenu={(e) => lessonMenu(e, s)}
       {...(!isChild(s) && dragProps(s))}
     >
-      <span className="session-title">{s.title}</span>
+      <span className="session-title">
+        <InlineMath text={s.title} />
+      </span>
       {running(s.id) ? (
         <span className="dot-pulse small" />
       ) : s.done ? (
@@ -235,7 +238,9 @@ export default function Sidebar({ sessions, folders, activeId, running, onSelect
             <ChevronRight size={14} className={`folder-chevron ${open ? "open" : ""}`} />
           </button>
           <GraduationCap size={15} className="folder-icon" />
-          <span className="session-title">{s.title}</span>
+          <span className="session-title">
+            <InlineMath text={s.title} />
+          </span>
           {running(s.id) || (!open && lessons.some((c) => running(c.id))) ? (
             <span className="dot-pulse small" />
           ) : (
