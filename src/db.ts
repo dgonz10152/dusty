@@ -79,6 +79,18 @@ export async function renameSession(id: string, title: string) {
   await (await db()).execute("UPDATE sessions SET title = $1 WHERE id = $2", [title, id]);
 }
 
+/** Ids of sessions whose title or conversation contains the query, case-insensitively. */
+export async function searchSessions(query: string): Promise<Set<string>> {
+  const like = `%${query.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+  // ponytail: LIKE scans every message; an FTS5 index is the upgrade if search gets slow on big histories
+  const rows: { id: string }[] = await (await db()).select(
+    `SELECT id FROM sessions WHERE title LIKE $1 ESCAPE '\\'
+     UNION SELECT session_id FROM messages WHERE role IN ('user', 'assistant') AND content LIKE $1 ESCAPE '\\'`,
+    [like],
+  );
+  return new Set(rows.map((r) => r.id));
+}
+
 export async function setDone(id: string, done: boolean) {
   await (await db()).execute("UPDATE sessions SET done = $1 WHERE id = $2", [done ? 1 : 0, id]);
 }

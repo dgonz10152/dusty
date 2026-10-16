@@ -1,4 +1,4 @@
-import { useState, type DragEvent } from "react";
+import { useEffect, useState, type DragEvent } from "react";
 import { Menu } from "@tauri-apps/api/menu";
 import {
   ChevronRight,
@@ -7,11 +7,13 @@ import {
   Folder as FolderIcon,
   FolderPlus,
   GraduationCap,
+  Search,
   Settings as SettingsIcon,
   SquarePen,
   Trash2,
+  X,
 } from "lucide-react";
-import { createFolder, deleteFolder, moveSession, renameFolder, type Folder, type Session } from "../db";
+import { createFolder, deleteFolder, moveSession, renameFolder, searchSessions, type Folder, type Session } from "../db";
 
 const DRAG_TYPE = "application/x-dusty-lesson";
 const COLLAPSED_KEY = "dusty.collapsedFolders";
@@ -51,6 +53,21 @@ export default function Sidebar({ sessions, folders, activeId, running, onSelect
   const [editing, setEditing] = useState<string | null>(null);
   // The folder id a lesson is being dragged over; "" is the top level.
   const [dropTarget, setDropTarget] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  // Ids matching the search; null until the first results are in.
+  const [matches, setMatches] = useState<Set<string> | null>(null);
+
+  useEffect(() => {
+    const q = query.trim();
+    if (!q) return setMatches(null);
+    let current = true;
+    const timer = setTimeout(() => searchSessions(q).then((ids) => current && setMatches(ids)), 120);
+    return () => {
+      current = false;
+      clearTimeout(timer);
+    };
+  }, [query, sessions]);
+
   function toggle(id: string) {
     const next = new Set(collapsed);
     if (!next.delete(id)) next.add(id);
@@ -243,64 +260,97 @@ export default function Sidebar({ sessions, folders, activeId, running, onSelect
       <button className="nav-item" onClick={() => onNew("exam")}>
         <GraduationCap size={16} /> New exam
       </button>
-      <div className="sidebar-label">
-        <span>Lessons</span>
-        <button className="icon-btn" aria-label="New folder" title="New folder" onClick={() => newFolder()}>
-          <FolderPlus size={14} />
-        </button>
-      </div>
-      <nav className={`session-list ${dropTarget === "" ? "drop" : ""}`} {...dropProps("")}>
-        {folders.map((f) => {
-          const lessons = top.filter((s) => s.folder_id === f.id);
-          const open = !collapsed.has(f.id);
-          return (
-            <div key={f.id} className={`folder ${dropTarget === f.id ? "drop" : ""}`} {...dropProps(f.id)}>
-              <div
-                role="button"
-                tabIndex={0}
-                aria-expanded={open}
-                className="session folder-row"
-                onClick={() => editing !== f.id && toggle(f.id)}
-                onDoubleClick={() => setEditing(f.id)}
-                onKeyDown={(e) => e.key === "Enter" && editing !== f.id && toggle(f.id)}
-                onContextMenu={(e) => folderMenu(e, f)}
-              >
-                <ChevronRight size={14} className={`folder-chevron ${open ? "open" : ""}`} />
-                <FolderIcon size={15} className="folder-icon" />
-                {editing === f.id ? (
-                  <input
-                    className="folder-input"
-                    defaultValue={f.name}
-                    aria-label="Folder name"
-                    autoFocus
-                    onFocus={(e) => e.currentTarget.select()}
-                    onClick={(e) => e.stopPropagation()}
-                    onBlur={(e) => commitRename(f, e.currentTarget.value)}
-                    onKeyDown={(e) => {
-                      e.stopPropagation();
-                      if (e.key === "Enter") e.currentTarget.blur();
-                      if (e.key === "Escape") setEditing(null);
-                    }}
-                  />
-                ) : (
-                  <span className="session-title">{f.name}</span>
-                )}
-                {!open && lessons.some((s) => running(s.id) || sessions.some((c) => c.parent_id === s.id && running(c.id))) ? (
-                  <span className="dot-pulse small" />
-                ) : (
-                  <span className="session-time">{lessons.length || ""}</span>
-                )}
-                <button className="icon-btn session-delete" aria-label="Folder options" onClick={(e) => folderMenu(e, f)}>
-                  <Ellipsis size={14} />
-                </button>
-              </div>
-              {open &&
-                (lessons.length ? lessons.map((s) => row(s, 1)) : <div className="folder-empty">Drag lessons here</div>)}
-            </div>
-          );
-        })}
-        {loose.map((s) => row(s))}
-      </nav>
+      <label className="search">
+        <Search size={14} />
+        <input
+          value={query}
+          placeholder="Search"
+          aria-label="Search lessons"
+          onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={(e) => e.key === "Escape" && setQuery("")}
+        />
+        {query && (
+          <button className="icon-btn" aria-label="Clear search" onClick={() => setQuery("")}>
+            <X size={12} />
+          </button>
+        )}
+      </label>
+      {query.trim() ? (
+        <>
+          <div className="sidebar-label">
+            <span>Results</span>
+          </div>
+          <nav className="session-list">
+            {matches &&
+              (matches.size ? (
+                sessions.filter((s) => matches.has(s.id)).map((s) => lessonRow(s))
+              ) : (
+                <div className="search-empty">No lessons match</div>
+              ))}
+          </nav>
+        </>
+      ) : (
+        <>
+          <div className="sidebar-label">
+            <span>Lessons</span>
+            <button className="icon-btn" aria-label="New folder" title="New folder" onClick={() => newFolder()}>
+              <FolderPlus size={14} />
+            </button>
+          </div>
+          <nav className={`session-list ${dropTarget === "" ? "drop" : ""}`} {...dropProps("")}>
+            {folders.map((f) => {
+              const lessons = top.filter((s) => s.folder_id === f.id);
+              const open = !collapsed.has(f.id);
+              return (
+                <div key={f.id} className={`folder ${dropTarget === f.id ? "drop" : ""}`} {...dropProps(f.id)}>
+                  <div
+                    role="button"
+                    tabIndex={0}
+                    aria-expanded={open}
+                    className="session folder-row"
+                    onClick={() => editing !== f.id && toggle(f.id)}
+                    onDoubleClick={() => setEditing(f.id)}
+                    onKeyDown={(e) => e.key === "Enter" && editing !== f.id && toggle(f.id)}
+                    onContextMenu={(e) => folderMenu(e, f)}
+                  >
+                    <ChevronRight size={14} className={`folder-chevron ${open ? "open" : ""}`} />
+                    <FolderIcon size={15} className="folder-icon" />
+                    {editing === f.id ? (
+                      <input
+                        className="folder-input"
+                        defaultValue={f.name}
+                        aria-label="Folder name"
+                        autoFocus
+                        onFocus={(e) => e.currentTarget.select()}
+                        onClick={(e) => e.stopPropagation()}
+                        onBlur={(e) => commitRename(f, e.currentTarget.value)}
+                        onKeyDown={(e) => {
+                          e.stopPropagation();
+                          if (e.key === "Enter") e.currentTarget.blur();
+                          if (e.key === "Escape") setEditing(null);
+                        }}
+                      />
+                    ) : (
+                      <span className="session-title">{f.name}</span>
+                    )}
+                    {!open && lessons.some((s) => running(s.id) || sessions.some((c) => c.parent_id === s.id && running(c.id))) ? (
+                      <span className="dot-pulse small" />
+                    ) : (
+                      <span className="session-time">{lessons.length || ""}</span>
+                    )}
+                    <button className="icon-btn session-delete" aria-label="Folder options" onClick={(e) => folderMenu(e, f)}>
+                      <Ellipsis size={14} />
+                    </button>
+                  </div>
+                  {open &&
+                    (lessons.length ? lessons.map((s) => row(s, 1)) : <div className="folder-empty">Drag lessons here</div>)}
+                </div>
+              );
+            })}
+            {loose.map((s) => row(s))}
+          </nav>
+        </>
+      )}
       <button className="nav-item" onClick={onOpenSettings}>
         <SettingsIcon size={16} /> Settings
       </button>
