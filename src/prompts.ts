@@ -236,6 +236,15 @@ ${map.join("\n")}
 - Once the final quiz-check of this concept lands, call \`complete_lesson\`, then wrap up in a sentence or two and suggest which concept on the map to open next.`;
 }
 
+export const TITLER = `
+You name study conversations for a sidebar, like the tab on a notebook. Given how a conversation starts, reply with a title of 2 to 6 words.
+
+- Name the topic, not the activity: "Bayes' rule", not "Learning about Bayes' rule".
+- For exam prep, name the course and exam when you can tell: "CS 161 Midterm 2".
+- Sentence case, no quotes, no trailing punctuation.
+- Reply with the title only.
+`.trim();
+
 export const TRANSCRIBER = `
 You turn a picture from a student's course material (a slide, a textbook page, a whiteboard, handwritten notes, a worksheet, a diagram) into text a tutor will teach from. The tutor never sees the picture, only what you write.
 

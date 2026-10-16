@@ -1,8 +1,9 @@
-import { addMessage, getMaterial, getMessages, getSession, getSetting, listSessions, setDone } from "./db";
+import { addMessage, getMaterial, getMaterialNames, getMessages, getSession, getSetting, listSessions, renameSession, setDone, type Session } from "./db";
 import { latestMap } from "./graph";
 import type { Message, Tool, ToolCall } from "./llm";
 import { loadImage, materialMessage, type Material } from "./material";
-import { childContext, EMPTY_PROFILE, examPrompt, RESEARCHER, teacherPrompt, TRANSCRIBER, type Profile } from "./prompts";
+import { childContext, EMPTY_PROFILE, examPrompt, RESEARCHER, teacherPrompt, TITLER, TRANSCRIBER, type Profile } from "./prompts";
+import { cleanTitle, titleInput } from "./title";
 import { getProvider, readModel } from "./providers";
 import { salvageToolCall } from "./quiz";
 
@@ -79,6 +80,16 @@ async function setup(sessionId: string): Promise<{ system: string; tools: Tool[]
   return { system: `${teacherPrompt(profile)}\n\n${context}`, tools: [...TEACHER_TOOLS, COMPLETE], material: await getMaterial(exam.id) };
 }
 
+/** Replaces the placeholder title (the first message) with a short AI summary, like ChatGPT does. */
+async function nameSession(session: Session, messages: Message[]) {
+  const { provider: providerId, model } = await readModel();
+  const provider = getProvider(providerId);
+  const names = session.kind === "exam" ? await getMaterialNames(session.id) : [];
+  const raw = await provider.complete({ model: provider.quickModel ?? model, system: TITLER, prompt: titleInput(messages, names) });
+  const title = cleanTitle(raw);
+  if (title) await renameSession(session.id, title);
+}
+
 /** Turns a picture of course material into text with the selected model. */
 export async function transcribeImage(file: File): Promise<string> {
   const { provider, model } = await readModel();
@@ -120,6 +131,7 @@ export async function runAgent(
   const { provider: providerId, model } = await readModel();
   const provider = getProvider(providerId);
   const { system, tools, material } = await setup(sessionId);
+  const session = await getSession(sessionId);
   // The material is sent ahead of the conversation on every turn but never stored in it.
   const preamble: Message[] = material.length ? [{ role: "user", content: materialMessage(material) }] : [];
   try {
@@ -166,6 +178,10 @@ export async function runAgent(
           }),
         );
         await addMessage(sessionId, msg);
+        // Titled once, after the first reply. An exam's lessons keep their map node's name.
+        if (session && !session.parent_id && !messages.some((m) => m.role === "assistant")) {
+          nameSession(session, [...messages, msg]).then(onSaved, (e) => console.warn("Couldn't title the session", e));
+        }
         await onSaved();
         onLive(null);
       } catch (e) {

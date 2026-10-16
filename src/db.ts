@@ -75,6 +75,10 @@ export async function deleteSession(id: string) {
   await d.execute("DELETE FROM sessions WHERE id = $1", [id]);
 }
 
+export async function renameSession(id: string, title: string) {
+  await (await db()).execute("UPDATE sessions SET title = $1 WHERE id = $2", [title, id]);
+}
+
 export async function setDone(id: string, done: boolean) {
   await (await db()).execute("UPDATE sessions SET done = $1 WHERE id = $2", [done ? 1 : 0, id]);
 }

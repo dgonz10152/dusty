@@ -139,6 +139,7 @@ async function run(
 export const claudeCode: Provider = {
   id: "claude-code",
   label: "Claude Code",
+  quickModel: "haiku",
 
   async listModels() {
     if (!(await invoke<boolean>("claude_available"))) throw new Error("Claude Code isn't installed");
@@ -160,6 +161,10 @@ export const claudeCode: Provider = {
 
   async research({ model, system, question, signal }) {
     return (await run("research", model, system, question, signal)).result ?? "";
+  },
+
+  async complete({ model, system, prompt }) {
+    return (await run("teach", model, system, prompt, new AbortController().signal)).result ?? "";
   },
 
   async transcribe({ model, system, image }) {

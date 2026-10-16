@@ -34,10 +34,14 @@ export type ImageData = { mime: string; data: string };
 
 export type TranscribeRequest = { model: string; system: string; image: ImageData };
 
+export type CompleteRequest = { model: string; system: string; prompt: string };
+
 /** An LLM backend. Dusty owns the agent loop; a provider only produces one assistant turn at a time. */
 export interface Provider {
   id: string;
   label: string;
+  /** A cheap model for small chores like titles. Without one, the selected model does them. */
+  quickModel?: string;
   /** Throws when the provider isn't reachable or set up. */
   listModels(): Promise<string[]>;
   /** What the student has to do before this provider works, if anything. */
@@ -48,4 +52,6 @@ export interface Provider {
   research(req: ResearchRequest): Promise<string>;
   /** Turns a picture into text. Throws when the model can't see images. */
   transcribe(req: TranscribeRequest): Promise<string>;
+  /** One plain-text reply to one prompt, without tools. */
+  complete(req: CompleteRequest): Promise<string>;
 }
