@@ -180,6 +180,20 @@ function Svg({ code }: { code: string }) {
   );
 }
 
+type MdNode = { type: string; value?: string; children?: MdNode[] };
+
+// Models put <br> in table cells, where Markdown has no line breaks. Raw HTML isn't rendered,
+// so turn just those tags into real breaks instead of showing them as text.
+function remarkBrTags() {
+  const walk = (node: MdNode) => {
+    node.children?.forEach((child, i) => {
+      if (child.type === "html" && /^<br\s*\/?>$/i.test(child.value ?? "")) node.children![i] = { type: "break" };
+      else walk(child);
+    });
+  };
+  return walk;
+}
+
 const CodeBlock = ({ code, lang }: { code: string; lang?: string }) => (
   <pre className="code-block" data-lang={lang}>
     <code>{code}</code>
@@ -213,7 +227,7 @@ function Markdown({ text, streaming = false }: { text: string; streaming?: boole
   };
   return (
     <div className="markdown">
-      <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex, rehypeMathPunctuation]} components={components}>
+      <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath, remarkBrTags]} rehypePlugins={[rehypeKatex, rehypeMathPunctuation]} components={components}>
         {normalizeMath(text)}
       </ReactMarkdown>
     </div>

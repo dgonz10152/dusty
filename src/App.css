@@ -21,7 +21,7 @@
   --accent: #7c3aed;
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 4px 16px rgba(0, 0, 0, 0.06);
   --radius: 12px;
-  --thread-width: 760px;
+  --thread-width: 880px;
 
   color-scheme: light dark;
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", "Segoe UI", system-ui, sans-serif;
@@ -493,21 +493,38 @@ div.tool-chip {
 }
 
 .markdown table {
-  border-collapse: collapse;
   display: block;
+  width: fit-content;
+  max-width: 100%;
   overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  border-spacing: 0;
 }
 
 .markdown th,
 .markdown td {
-  padding: 6px 12px;
-  border: 1px solid var(--border);
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
   text-align: left;
+  vertical-align: top;
+  /* Unlike the .markdown default, this never shrinks a column into letter-by-letter wrapping. */
+  overflow-wrap: break-word;
+}
+
+.markdown tr:last-child td {
+  border-bottom: none;
 }
 
 .markdown th {
   background: var(--bg-subtle);
+  font-size: 13px;
   font-weight: 600;
+  color: var(--text-muted);
+}
+
+.markdown td:first-child {
+  min-width: 120px;
 }
 
 .inline-code {
