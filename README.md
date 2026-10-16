@@ -32,7 +32,7 @@ Two principles drive it: start from truths you can accept without caveats, and m
 ## Stack
 
 - [Tauri 2](https://tauri.app) with React 19, TypeScript, and Vite
-- [Ollama](https://ollama.com) for the model, via Ollama Cloud for now
+- Pluggable model providers (`src/providers/`): [Ollama](https://ollama.com) and [Claude Code](https://claude.com/claude-code)
 - `tauri-plugin-sql` (SQLite), `tauri-plugin-http`, and `keyring`
 
 ## Getting started
@@ -44,8 +44,17 @@ npm install
 npm run tauri dev
 ```
 
-Then open **Settings**, paste an API key from [ollama.com/settings/keys](https://ollama.com/settings/keys), and fill in **About me**.
-Pick a model that supports tool calling from the model picker under the message box.
+Then open **Settings** and fill in **About me**, and pick a model from the picker under the message box.
+
+### Claude models
+
+Install [Claude Code](https://claude.com/claude-code) and run `claude` once in a terminal to sign in.
+Dusty finds it on its own and lists Opus, Sonnet, and Haiku in the picker, using your Claude plan.
+Each turn runs headless `claude -p` with no tools, and research uses its built-in web search.
+
+### Ollama models
+
+Paste an API key from [ollama.com/settings/keys](https://ollama.com/settings/keys) in **Settings**, then pick a model that supports tool calling.
 
 To use a local Ollama instead, set the host in Settings to `http://localhost:11434`.
 The `research` tool still needs an ollama.com key, since web search is a cloud API.
@@ -61,4 +70,4 @@ npm run tauri build # production bundle
 ## Roadmap
 
 - Canvas integration, so lessons can use your course's lecture slides and textbook as a source of truth
-- First-class local model support
+- More model providers
