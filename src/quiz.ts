@@ -1,3 +1,5 @@
+import type { Message } from "ollama/browser";
+
 export type Option = { label: string; value: string };
 
 export type QuizArgs = {
@@ -62,4 +64,21 @@ export function gradeQuiz(args: QuizArgs, selected: string[] | null, note?: stri
   const want = new Set(args.correct);
   const ok = selected.length === want.size && selected.every((s) => want.has(s));
   return { result: ok ? "correct" : "wrong", selected, ...base };
+}
+
+// A model sometimes writes a quiz or question as a JSON block ending its reply instead of calling the tool
+// (seen after a ```deps block primed it). Turn that trailing block back into the real tool call.
+export function salvageToolCall(msg: Message): Message {
+  if (msg.tool_calls?.length) return msg;
+  const m = /```(?:json)?\s*\n(\{[\s\S]*\})\s*\n```\s*$/.exec(msg.content);
+  if (!m) return msg;
+  let args: Record<string, unknown>;
+  try {
+    args = JSON.parse(m[1]);
+  } catch {
+    return msg;
+  }
+  if (typeof args.question !== "string" || !args.options) return msg;
+  const name = "correctAnswer" in args ? "quiz" : "ask_user_question";
+  return { ...msg, content: msg.content.slice(0, m.index).trimEnd(), tool_calls: [{ function: { name, arguments: args } }] };
 }

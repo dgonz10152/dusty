@@ -3,6 +3,7 @@ import { fetch } from "@tauri-apps/plugin-http";
 import { invoke } from "@tauri-apps/api/core";
 import { addMessage, getMessages, getSetting } from "./db";
 import { EMPTY_PROFILE, RESEARCHER, teacherPrompt, type Profile } from "./prompts";
+import { salvageToolCall } from "./quiz";
 
 export const DEFAULT_HOST = "https://ollama.com";
 export const DEFAULT_MODEL = "gpt-oss:120b";
@@ -195,10 +196,12 @@ export async function runAgent(
 
       let partial: Message | null = null;
       try {
-        const msg = await chatOnce(client, model, [{ role: "system", content: system }, ...messages], TEACHER_TOOLS, signal, (m) => {
-          partial = m;
-          onLive({ content: m.content, thinking: m.thinking ?? "" });
-        });
+        const msg = salvageToolCall(
+          await chatOnce(client, model, [{ role: "system", content: system }, ...messages], TEACHER_TOOLS, signal, (m) => {
+            partial = m;
+            onLive({ content: m.content, thinking: m.thinking ?? "" });
+          }),
+        );
         await addMessage(sessionId, msg);
         await onSaved();
         onLive(null);

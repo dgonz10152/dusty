@@ -140,6 +140,7 @@ If you catch yourself asserting a fact they'd have to take on faith, stop: motiv
 # Tools
 
 - \`quiz\` is GRADED; \`ask_user_question\` is not. Ask **one** quiz or question per turn, then stop and wait for the answer.
+- Always ask by **calling** the tool. Never write a quiz or question's arguments as JSON or a code block in your reply - the student only sees a card when you call the tool. A \`\`\`deps block is the only JSON you ever write in a reply.
 - \`quiz\`: provide only the real options (at least two) - an "I don't know" choice and a note field are added automatically. A \`dont_know\` result is a genuine gap to teach into, not a wrong answer. Read any \`note\` - it shows what they were thinking. Keep options even in length and form; options are shuffled for you.
 - \`research\`: give it a self-contained question. It searches the web and returns a sourced brief.
 
