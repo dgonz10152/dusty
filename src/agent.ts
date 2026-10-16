@@ -1,8 +1,8 @@
 import { addMessage, getMaterial, getMessages, getSession, getSetting, listSessions, setDone } from "./db";
 import { latestMap } from "./graph";
 import type { Message, Tool, ToolCall } from "./llm";
-import { materialMessage, type Material } from "./material";
-import { childContext, EMPTY_PROFILE, examPrompt, RESEARCHER, teacherPrompt, type Profile } from "./prompts";
+import { loadImage, materialMessage, type Material } from "./material";
+import { childContext, EMPTY_PROFILE, examPrompt, RESEARCHER, teacherPrompt, TRANSCRIBER, type Profile } from "./prompts";
 import { getProvider, readModel } from "./providers";
 import { salvageToolCall } from "./quiz";
 
@@ -77,6 +77,13 @@ async function setup(sessionId: string): Promise<{ system: string; tools: Tool[]
   const done = new Set((await listSessions()).filter((s) => s.parent_id === exam.id && s.done && s.node_id).map((s) => s.node_id!));
   const context = childContext(exam.title, latestMap(await getMessages(exam.id)), session!.node_id, done);
   return { system: `${teacherPrompt(profile)}\n\n${context}`, tools: [...TEACHER_TOOLS, COMPLETE], material: await getMaterial(exam.id) };
+}
+
+/** Turns a picture of course material into text with the selected model. */
+export async function transcribeImage(file: File): Promise<string> {
+  const { provider, model } = await readModel();
+  const text = await getProvider(provider).transcribe({ model, system: TRANSCRIBER, image: await loadImage(file) });
+  return `[Transcribed from a picture]\n\n${text}`;
 }
 
 /** A turn in progress. `tool` is a tool call the model has started writing but not finished. */

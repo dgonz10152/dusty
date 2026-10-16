@@ -92,9 +92,11 @@ async fn claude_run(
     if !CLAUDE_MODELS.contains(&model.as_str()) {
         return Err(format!("Unknown Claude model: {model}"));
     }
-    let tools = match kind.as_str() {
-        "teach" => "",
-        "research" => "WebSearch,WebFetch",
+    let (tools, input_format) = match kind.as_str() {
+        "teach" => ("", "text"),
+        "research" => ("WebSearch,WebFetch", "text"),
+        // Images can only be passed in as stream-json messages.
+        "transcribe" => ("", "stream-json"),
         _ => return Err(format!("Unknown run kind: {kind}")),
     };
     let bin = claude_path().ok_or("Claude Code isn't installed")?;
@@ -109,6 +111,8 @@ async fn claude_run(
         "stream-json",
         "--verbose",
         "--include-partial-messages",
+        "--input-format",
+        input_format,
         // Thinking text is omitted in print mode unless asked for; summaries are what the API offers.
         "--thinking-display",
         "summarized",

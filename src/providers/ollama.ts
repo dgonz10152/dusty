@@ -2,7 +2,7 @@ import { Ollama, type Message as OllamaMessage } from "ollama/browser";
 import { fetch } from "@tauri-apps/plugin-http";
 import { invoke } from "@tauri-apps/api/core";
 import { getSetting } from "../db";
-import type { ChatRequest, Message, Provider, ResearchRequest, Tool } from "../llm";
+import type { ChatRequest, Message, Provider, ResearchRequest, Tool, TranscribeRequest } from "../llm";
 
 export const DEFAULT_HOST = "https://ollama.com";
 
@@ -86,5 +86,19 @@ export const ollama: Provider = {
       }
     }
     return messages.at(-1)?.content || "Research hit its step limit without a conclusion.";
+  },
+
+  async transcribe({ model, system, image }: TranscribeRequest) {
+    const client = await getClient();
+    const { capabilities } = await client.show({ model });
+    if (!capabilities?.includes("vision")) throw new Error(`${model} can't read images`);
+    const res = await client.chat({
+      model,
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: "Transcribe this picture.", images: [image.data] },
+      ],
+    });
+    return res.message.content;
   },
 };

@@ -1,13 +1,13 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ArrowUp, ChevronDown, ChevronRight, CircleCheck, FileText, Globe, GraduationCap, Paperclip, Square, X } from "lucide-react";
+import { ArrowUp, ChevronDown, ChevronRight, CircleCheck, FileText, Globe, GraduationCap, ImageIcon, Paperclip, Square, X } from "lucide-react";
 import type { ModelRef, ToolCall } from "../llm";
 import Markdown, { ExamMapContext, type ExamMap } from "./Markdown";
 import { QuestionCard, QuizCard } from "./Cards";
-import { INTERACTIVE, pendingCall, type Live } from "../agent";
+import { INTERACTIVE, pendingCall, transcribeImage, type Live } from "../agent";
 import { PROVIDERS, sameModel } from "../providers";
 import type { ChatMessage, Session } from "../db";
 import type { DepNode } from "../graph";
-import { extractText, materialError, type Material } from "../material";
+import { extractText, isImage, materialError, type Material } from "../material";
 
 type Props = {
   session?: Session;
@@ -82,14 +82,14 @@ function ToolView({ call, result, onAnswer }: { call: ToolCall; result?: string;
 
 type Attachment = { id: string; name: string; content?: string; error?: string };
 
-const READABLE = /\.(pdf|txt|md|markdown)$/i;
+const DOCUMENT = /\.(pdf|txt|md|markdown)$/i;
 // Pastes longer than this become an attachment instead of filling the message box.
 const LONG_PASTE = 2000;
 
 function AttachmentChip({ name, loading, error, onRemove }: { name: string; loading?: boolean; error?: string; onRemove?: () => void }) {
   return (
     <div className={`attachment ${error ? "failed" : ""}`} title={error ?? name}>
-      {loading ? <span className="dot-pulse small" /> : <FileText size={14} />}
+      {loading ? <span className="dot-pulse small" /> : isImage(name) ? <ImageIcon size={14} /> : <FileText size={14} />}
       <span className="attachment-name">{name}</span>
       {error && <span className="attachment-error">{error}</span>}
       {onRemove && (
@@ -174,7 +174,7 @@ function Composer({
       <div className="composer-bar">
         <div className="composer-tools">
           {onAttach && (
-            <button className="icon-btn attach-btn" aria-label="Add files" title="Add PDFs, .txt, or .md files" onClick={onAttach}>
+            <button className="icon-btn attach-btn" aria-label="Add files" title="Add PDFs, pictures, .txt, or .md files" onClick={onAttach}>
               <Paperclip size={16} />
             </button>
           )}
@@ -231,8 +231,21 @@ export default function Chat(props: Props) {
   function attach(files: File[]) {
     for (const file of files) {
       const id = crypto.randomUUID();
-      if (!READABLE.test(file.name)) {
-        setAttachments((list) => [...list, { id, name: file.name, error: "Only PDF, .txt, and .md files" }]);
+      if (isImage(file.name)) {
+        setAttachments((list) => [...list, { id, name: file.name }]);
+        transcribeImage(file).then(
+          (content) => patch(id, { content }),
+          (e) =>
+            patch(id, {
+              error: /can't read images/.test(String(e))
+                ? "This model can't see pictures. Pick a Claude model or a vision model."
+                : "Couldn't read this picture",
+            }),
+        );
+        continue;
+      }
+      if (!DOCUMENT.test(file.name)) {
+        setAttachments((list) => [...list, { id, name: file.name, error: "Only PDFs, pictures, .txt, and .md files" }]);
         continue;
       }
       setAttachments((list) => [...list, { id, name: file.name }]);
@@ -385,7 +398,7 @@ export default function Chat(props: Props) {
           <h1>{drafting ? "What's your exam on?" : "What do you want to learn?"}</h1>
           <p className="muted">
             {drafting
-              ? "Add your slides, notes, or study guide. Dusty maps every concept on the exam, then teaches each one as its own lesson."
+              ? "Add your slides, notes, study guide, or photos of them. Dusty maps every concept on the exam, then teaches each one as its own lesson."
               : "Dusty finds what you already know, plans a path, then teaches it so it sticks."}
           </p>
           {setupHint && (
@@ -403,7 +416,7 @@ export default function Chat(props: Props) {
               type="file"
               multiple
               hidden
-              accept=".pdf,.txt,.md,.markdown"
+              accept=".pdf,.txt,.md,.markdown,image/*,.heic,.heif"
               onChange={(e) => {
                 attach([...(e.currentTarget.files ?? [])]);
                 e.currentTarget.value = "";

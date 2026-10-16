@@ -1,5 +1,7 @@
 // Course material for exam sessions: what the student uploads, turned into text the tutor reads.
 
+import type { ImageData } from "./llm";
+
 export type Material = { name: string; content: string };
 
 // ponytail: the whole material rides along in every exam and child turn, so it has to fit the context window
@@ -18,6 +20,37 @@ export function materialError(items: Material[]): string | null {
 export function materialMessage(items: Material[]): string {
   const files = items.map((m) => `# file: ${m.name}\n\n${m.content.trim()}`).join("\n\n");
   return `Here is my course material for the exam. Treat it as the source of truth for what's in scope, and for its notation and definitions.\n\n<course_material>\n${files}\n</course_material>`;
+}
+
+export const isImage = (name: string) => /\.(png|jpe?g|gif|webp|heic|heif|bmp|tiff?|avif)$/i.test(name);
+
+// Claude downscales anything with a longer edge past this anyway.
+const MAX_EDGE = 1568;
+
+/**
+ * Decodes any picture the webview can show (including iPhone HEIC photos) and re-encodes it as a JPEG
+ * that every vision model accepts, scaled down so it stays small.
+ */
+export async function loadImage(file: File): Promise<ImageData> {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = new Image();
+    img.src = url;
+    await img.decode();
+    const scale = Math.min(1, MAX_EDGE / Math.max(img.naturalWidth, img.naturalHeight));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(img.naturalWidth * scale);
+    canvas.height = Math.round(img.naturalHeight * scale);
+    const ctx = canvas.getContext("2d")!;
+    // Transparent PNGs would turn black as JPEGs.
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    const dataUrl = canvas.toDataURL("image/jpeg", 0.9);
+    return { mime: "image/jpeg", data: dataUrl.slice(dataUrl.indexOf(",") + 1) };
+  } finally {
+    URL.revokeObjectURL(url);
+  }
 }
 
 export async function extractText(file: File): Promise<string> {

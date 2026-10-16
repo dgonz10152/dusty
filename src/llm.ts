@@ -29,6 +29,11 @@ export type ChatRequest = {
 
 export type ResearchRequest = { model: string; system: string; question: string; signal: AbortSignal };
 
+/** A picture as base64, without the data: URL prefix. */
+export type ImageData = { mime: string; data: string };
+
+export type TranscribeRequest = { model: string; system: string; image: ImageData };
+
 /** An LLM backend. Dusty owns the agent loop; a provider only produces one assistant turn at a time. */
 export interface Provider {
   id: string;
@@ -41,4 +46,6 @@ export interface Provider {
   chat(req: ChatRequest): Promise<Message>;
   /** Answers a self-contained question from the web and returns a sourced brief. */
   research(req: ResearchRequest): Promise<string>;
+  /** Turns a picture into text. Throws when the model can't see images. */
+  transcribe(req: TranscribeRequest): Promise<string>;
 }

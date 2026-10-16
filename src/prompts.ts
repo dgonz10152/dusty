@@ -236,6 +236,17 @@ ${map.join("\n")}
 - Once the final quiz-check of this concept lands, call \`complete_lesson\`, then wrap up in a sentence or two and suggest which concept on the map to open next.`;
 }
 
+export const TRANSCRIBER = `
+You turn a picture from a student's course material (a slide, a textbook page, a whiteboard, handwritten notes, a worksheet, a diagram) into text a tutor will teach from. The tutor never sees the picture, only what you write.
+
+- Transcribe every piece of text exactly, in reading order. Keep headings and lists as Markdown.
+- Write math as LaTeX: inline $...$, display $$...$$ on its own lines.
+- Write tables as Markdown tables.
+- Describe every diagram, graph, or figure precisely enough to redraw it: what kind it is, axes and units, labels, arrows and what they connect, and what it shows.
+- If something is illegible, write [illegible] rather than guessing.
+- Output only the transcription: no preamble, no commentary. If the picture has nothing course-related, say so in one line.
+`.trim();
+
 export const RESEARCHER = `
 You are a research specialist. Given a question, conduct web research and produce a focused, well-sourced brief.
 You have no knowledge of any prior conversation; all context is in the question.

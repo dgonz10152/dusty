@@ -96,7 +96,7 @@ export function applyEvent(msg: Message, ev: StreamEvent) {
 
 /** Runs `claude` once and resolves with the final result event. */
 async function run(
-  kind: "teach" | "research",
+  kind: "teach" | "research" | "transcribe",
   model: string,
   system: string,
   input: string,
@@ -160,5 +160,20 @@ export const claudeCode: Provider = {
 
   async research({ model, system, question, signal }) {
     return (await run("research", model, system, question, signal)).result ?? "";
+  },
+
+  async transcribe({ model, system, image }) {
+    // The picture goes in as a stream-json user message, which is the only way print mode takes images.
+    const input = JSON.stringify({
+      type: "user",
+      message: {
+        role: "user",
+        content: [
+          { type: "image", source: { type: "base64", media_type: image.mime, data: image.data } },
+          { type: "text", text: "Transcribe this picture." },
+        ],
+      },
+    });
+    return (await run("transcribe", model, system, `${input}\n`, new AbortController().signal)).result ?? "";
   },
 };
