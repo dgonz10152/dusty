@@ -69,7 +69,8 @@ function OptionRow({
   );
 }
 
-export function QuizCard({ args: raw, result, onAnswer }: CardProps) {
+/** `fromBasics` offers "Teach me from the basics", for while the tutor is still probing the student's level. */
+export function QuizCard({ args: raw, result, onAnswer, fromBasics }: CardProps & { fromBasics?: boolean }) {
   const args = useMemo(() => parseQuizArgs(raw), [raw]);
   const options = useMemo(
     () => (args.shuffle ? shuffled(args.options, args.question) : args.options),
@@ -83,7 +84,7 @@ export function QuizCard({ args: raw, result, onAnswer }: CardProps) {
   const markFor = (v: string): Mark | undefined => {
     if (!answer) return undefined;
     const isCorrect = args.correct.includes(v);
-    if (answer.result === "dont_know") return isCorrect ? "reveal" : undefined;
+    if (answer.result === "dont_know" || answer.result === "from_basics") return isCorrect ? "reveal" : undefined;
     const picked = answer.selected.includes(v);
     if (isCorrect) return picked ? "right" : "missed";
     return picked ? "wrong" : undefined;
@@ -116,7 +117,14 @@ export function QuizCard({ args: raw, result, onAnswer }: CardProps) {
       {answer ? (
         <div className="card-feedback">
           <div className="verdict">
-            {answer.result === "correct" ? "Correct" : answer.result === "wrong" ? "Not quite" : "You didn't know - that's useful to know"}
+            {
+              {
+                correct: "Correct",
+                wrong: "Not quite",
+                dont_know: "You didn't know - that's useful to know",
+                from_basics: "Starting from the basics",
+              }[answer.result]
+            }
           </div>
           {answer.note && <div className="card-note">Your note: {answer.note}</div>}
           <Markdown text={args.explanation} />
@@ -130,6 +138,14 @@ export function QuizCard({ args: raw, result, onAnswer }: CardProps) {
             onChange={(e) => setNote(e.target.value)}
           />
           <div className="card-actions">
+            {fromBasics && (
+              <button
+                className="btn ghost from-basics"
+                onClick={() => onAnswer(JSON.stringify({ ...gradeQuiz(args, null, note), result: "from_basics" }))}
+              >
+                Teach me from the basics
+              </button>
+            )}
             <button className="btn ghost" onClick={() => submit(null)}>
               I don't know
             </button>

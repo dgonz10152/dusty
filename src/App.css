@@ -1006,7 +1006,8 @@ div.tool-chip {
 }
 
 .option.reveal .mark,
-.card.dont_know .verdict {
+.card.dont_know .verdict,
+.card.from_basics .verdict {
   color: var(--amber);
 }
 
@@ -1041,6 +1042,10 @@ div.tool-chip {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+}
+
+.card-actions .from-basics {
+  margin-right: auto;
 }
 
 .card-feedback {

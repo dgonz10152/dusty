@@ -1,12 +1,12 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ArrowUp, ChevronDown, ChevronRight, CircleCheck, FileText, Globe, GraduationCap, ImageIcon, Paperclip, Square, X } from "lucide-react";
+import { ArrowUp, BookmarkPlus, ChevronDown, ChevronRight, CircleCheck, FileText, Globe, GraduationCap, ImageIcon, Paperclip, Square, X } from "lucide-react";
 import type { ModelRef, ToolCall } from "../llm";
 import Markdown, { ExamMapContext, InlineMath, type ExamMap } from "./Markdown";
 import { QuestionCard, QuizCard } from "./Cards";
 import { INTERACTIVE, pendingCall, transcribeImage, type Live } from "../agent";
 import { PROVIDERS, sameModel } from "../providers";
 import type { Attachment, ChatMessage, Session } from "../db";
-import type { DepNode } from "../graph";
+import { latestMap, type DepNode } from "../graph";
 import { extractText, isImage, materialError, type Material } from "../material";
 
 type Props = {
@@ -50,15 +50,27 @@ const WRITING: Record<string, string> = {
   ask_user_question: "Writing a question",
   research: "Planning research",
   complete_lesson: "Marking the lesson done",
+  save_course: "Saving your course",
 };
 
-function ToolView({ call, result, onAnswer }: { call: ToolCall; result?: string; onAnswer?: (content: string) => void }) {
+function ToolView({
+  call,
+  result,
+  onAnswer,
+  probing,
+}: {
+  call: ToolCall;
+  result?: string;
+  onAnswer?: (content: string) => void;
+  /** Still finding the student's level: no plan yet. */
+  probing?: boolean;
+}) {
   const args = call.function.arguments;
   if (result?.startsWith("Cancelled")) {
     return <div className="tool-chip muted">Skipped: {String(args.question ?? call.function.name)}</div>;
   }
   const answer = onAnswer ?? (() => {});
-  if (call.function.name === "quiz") return <QuizCard args={args} result={result} onAnswer={answer} />;
+  if (call.function.name === "quiz") return <QuizCard args={args} result={result} onAnswer={answer} fromBasics={probing && !!onAnswer} />;
   if (call.function.name === "ask_user_question") return <QuestionCard args={args} result={result} onAnswer={answer} />;
   if (call.function.name === "research") {
     return (
@@ -68,6 +80,13 @@ function ToolView({ call, result, onAnswer }: { call: ToolCall; result?: string;
         </summary>
         {result && <Markdown text={result} />}
       </details>
+    );
+  }
+  if (call.function.name === "save_course") {
+    return (
+      <div className="tool-chip">
+        <BookmarkPlus size={14} /> Saved {String(args.course ?? "the course")} to your courses
+      </div>
     );
   }
   if (call.function.name === "complete_lesson") {
@@ -291,6 +310,8 @@ export default function Chat(props: Props) {
 
   const pending = pendingCall(messages);
   const waitingOnStudent = !running && !!pending && INTERACTIVE.has(pending.function.name);
+  // The plan's map ends probing.
+  const probing = useMemo(() => !latestMap(messages), [messages]);
   const drafting = !session && draftKind === "exam";
   const composer = (
     <Composer
@@ -363,6 +384,7 @@ export default function Chat(props: Props) {
             call={call}
             result={results[k]?.content}
             onAnswer={waitingOnStudent && call === pending ? (content) => onAnswer(call, content) : undefined}
+            probing={probing}
           />
         ))}
       </div>

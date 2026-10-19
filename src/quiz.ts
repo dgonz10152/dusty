@@ -13,7 +13,8 @@ export type QuizArgs = {
 };
 
 export type QuizResult = {
-  result: "correct" | "wrong" | "dont_know";
+  /** `from_basics`: the student asked to be taught from the basics instead of answering. */
+  result: "correct" | "wrong" | "dont_know" | "from_basics";
   selected: string[];
   correctAnswer: string[];
   note?: string;

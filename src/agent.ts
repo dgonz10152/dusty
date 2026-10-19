@@ -1,8 +1,8 @@
-import { addMessage, getAttachments, getMaterial, getMessages, getSession, getSetting, listSessions, renameSession, setDone, type Session } from "./db";
+import { addMessage, getAttachments, getMaterial, getMessages, getSession, getSetting, listSessions, renameSession, setDone, setSetting, type Session } from "./db";
 import { latestMap } from "./graph";
 import type { Message, Tool, ToolCall } from "./llm";
 import { loadImage, materialMessage, withMaterial, type Material } from "./material";
-import { childContext, EMPTY_PROFILE, examPrompt, RESEARCHER, teacherPrompt, TITLER, TRANSCRIBER, type Profile } from "./prompts";
+import { addCourse, childContext, EMPTY_PROFILE, examPrompt, RESEARCHER, teacherPrompt, TITLER, TRANSCRIBER, type Profile } from "./prompts";
 import { cleanTitle, titleInput } from "./title";
 import { getProvider, readModel } from "./providers";
 import { salvageToolCall } from "./quiz";
@@ -23,7 +23,7 @@ const optionsSchema = {
 
 const QUIZ = fn(
   "quiz",
-  "Ask the student a GRADED multiple-choice question with a known correct answer. The app grades it, reveals the answer and your explanation, and returns the result (correct / wrong / dont_know, plus an optional note). Use it to probe their level and to check each node landed. An 'I don't know' choice is added automatically - never add your own.",
+  "Ask the student a GRADED multiple-choice question with a known correct answer. The app grades it, reveals the answer and your explanation, and returns the result (correct / wrong / dont_know, plus an optional note; from_basics means they asked to be taught from the basics). Use it to probe their level and to check each node landed. An 'I don't know' choice is added automatically - never add your own.",
   {
     question: { type: "string" },
     details: { type: "string", description: "Optional context shown under the question." },
@@ -66,7 +66,14 @@ const COMPLETE = fn(
   [],
 );
 
-const TEACHER_TOOLS = [QUIZ, ASK, RESEARCH];
+const SAVE_COURSE = fn(
+  "save_course",
+  "Add a course to the student's profile, so it's known next time. Only for a course they named that isn't in their profile yet.",
+  { course: { type: "string", description: 'The course as they named it, e.g. "Chem 20A".' } },
+  ["course"],
+);
+
+const TEACHER_TOOLS = [QUIZ, ASK, RESEARCH, SAVE_COURSE];
 
 /**
  * The prompt and tools a session runs with: a plain lesson, an exam, or one of an exam's lessons.
@@ -157,6 +164,11 @@ export async function runAgent(
         } else if (call.function.name === "complete_lesson") {
           await setDone(sessionId, true);
           content = "Marked done on the exam map.";
+        } else if (call.function.name === "save_course") {
+          const profile = { ...EMPTY_PROFILE, ...(await getSetting<Profile>("profile", EMPTY_PROFILE)) };
+          const courses = addCourse(profile.courses, String(call.function.arguments.course ?? ""));
+          await setSetting("profile", { ...profile, courses });
+          content = courses === profile.courses ? "Already in their profile." : "Saved to their profile.";
         } else {
           content = `Unknown tool: ${call.function.name}`;
         }

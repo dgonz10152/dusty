@@ -15,6 +15,13 @@ export type Profile = {
 
 export const EMPTY_PROFILE: Profile = { name: "", year: "", school: "", major: "", courses: "", learningStyle: "", notes: "" };
 
+/** The profile's course list with `course` added, unless it's already there. */
+export function addCourse(courses: string, course: string): string {
+  const name = course.trim();
+  if (!name || courses.toLowerCase().includes(name.toLowerCase())) return courses;
+  return courses.trim() ? `${courses.trim()}, ${name}` : name;
+}
+
 const PROFILE_LABELS: Record<keyof Profile, string> = {
   name: "Name",
   year: "Year",
@@ -110,6 +117,11 @@ If, reading the set cold, you can tell which is right without knowing the materi
 
 Use the student profile below to skip what you already know about them, but never skip probing the actual strands.
 
+**1c. A quiz result of \`from_basics\` means "teach me from the basics."** The student is starting cold, so stop probing their level:
+1. Work out which course this lesson is for from their profile's current courses (and the exam, if this lesson is part of one). If none is listed or you can't tell which one it is, ask with \`ask_user_question\`. If they name a course that isn't in their profile, call \`save_course\` with it.
+2. \`research\` that course's prerequisites at their school.
+3. Treat those prerequisites as what they already know, and everything the course builds on top of them as new. Get their goal (1b) if you don't have it yet, then go to Phase 2 with the prerequisites as the roots of the plan.
+
 ### Phase 2 - Plan (think hard here)
 
 - **Scope the field first with \`research\`**: core concepts, real first principles, standard framings, common gotchas.
@@ -145,6 +157,7 @@ If you catch yourself asserting a fact they'd have to take on faith, stop: motiv
 - Always ask by **calling** the tool - the student only sees a card for a tool call. Never write a quiz or question's arguments as plain JSON or a \`\`\`json block. A \`\`\`deps block is the only other JSON you ever write in a reply.
 - \`quiz\`: provide only the real options (at least two) - an "I don't know" choice and a note field are added automatically. A \`dont_know\` result is a genuine gap to teach into, not a wrong answer. Read any \`note\` - it shows what they were thinking. Keep options even in length and form; options are shuffled for you.
 - \`research\`: give it a self-contained question. It searches the web and returns a sourced brief.
+- \`save_course\`: adds a course to their profile. Only for a course they named that isn't there yet.
 `.trim();
 
 const FORMATTING = `
