@@ -1,5 +1,6 @@
 // Course material for exam sessions: what the student uploads, turned into text the tutor reads.
 
+import type { PDFPageProxy } from "pdfjs-dist";
 import type { ImageData } from "./llm";
 
 export type Material = { name: string; content: string };
@@ -66,8 +67,12 @@ export async function extractText(file: File): Promise<string> {
     const pdf = await task.promise;
     const pages: string[] = [];
     for (let i = 1; i <= pdf.numPages; i++) {
-      const { items } = await (await pdf.getPage(i)).getTextContent();
-      const text = items.map((it) => ("str" in it ? it.str + (it.hasEOL ? "\n" : "") : "")).join("");
+      // Not getTextContent: it `for await`s a ReadableStream, which WebKit (the macOS webview) can't iterate.
+      const reader = (await pdf.getPage(i)).streamTextContent().getReader() as ReadableStreamDefaultReader<Awaited<ReturnType<PDFPageProxy["getTextContent"]>>>;
+      let text = "";
+      for (let chunk = await reader.read(); !chunk.done; chunk = await reader.read()) {
+        for (const it of chunk.value.items) if ("str" in it) text += it.str + (it.hasEOL ? "\n" : "");
+      }
       pages.push(`--- Page ${i} ---\n${text.trim()}`);
     }
     return pages.join("\n\n");
