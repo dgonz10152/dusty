@@ -12,12 +12,13 @@ import {
   addMessage,
   createSession,
   deleteSession,
-  getMaterialNames,
+  getAttachments,
   getMessages,
   listFolders,
   listSessions,
   setDone,
   setSetting,
+  type Attachment,
   type ChatMessage,
   type Folder,
   type Session,
@@ -41,7 +42,7 @@ export default function App() {
   const [activeId, setActiveId] = useState<string | null>(null);
   // What "send" creates while no session is open.
   const [draftKind, setDraftKind] = useState<Session["kind"]>("lesson");
-  const [materialNames, setMaterialNames] = useState<string[]>([]);
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [runs, setRuns] = useState<Record<string, Run>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -57,8 +58,10 @@ export default function App() {
     setFolders(f);
   }, []);
   const reloadMessages = useCallback(async (sid: string) => {
-    const m = await getMessages(sid);
-    if (activeRef.current === sid) setMessages(m);
+    const [m, a] = await Promise.all([getMessages(sid), getAttachments(sid)]);
+    if (activeRef.current !== sid) return;
+    setMessages(m);
+    setAttachments(a);
   }, []);
   const loadConfig = useCallback(async () => {
     const m = await readModel();
@@ -76,11 +79,9 @@ export default function App() {
     activeRef.current = sid;
     setActiveId(sid);
     setDraftKind(kind);
-    setMaterialNames([]);
-    if (sid) {
-      reloadMessages(sid);
-      getMaterialNames(sid).then((names) => activeRef.current === sid && setMaterialNames(names));
-    } else setMessages([]);
+    setAttachments([]);
+    if (sid) reloadMessages(sid);
+    else setMessages([]);
   }
 
   function setError(sid: string, error?: string) {
@@ -107,17 +108,17 @@ export default function App() {
       });
   }
 
-  async function send(text: string, material: Material[] = []) {
+  async function send(text: string, material: Material[]) {
     let sid = activeId;
     if (!sid) {
-      // ponytail: title is the first message; ask the model for a title if these read badly
-      const title = text || material[0]?.name || "Exam";
+      // A placeholder until the first reply, when the session gets an AI title.
+      const title = text || material[0].name;
       sid = (await createSession(title.length > 60 ? `${title.slice(0, 57)}...` : title, { kind: draftKind })).id;
-      for (const m of material) await addMaterial(sid, m);
       select(sid, draftKind);
-      text ||= "Here's what my exam covers.";
+      if (draftKind === "exam") text ||= "Here's what my exam covers.";
     }
-    await addUserMessage(sid, text);
+    const id = await addUserMessage(sid, text || "Here are my files.");
+    for (const m of material) await addMaterial(sid, id, m);
     await reloadMessages(sid);
     refreshSessions();
     start(sid);
@@ -180,7 +181,7 @@ export default function App() {
         draftKind={draftKind}
         exam={sessions.find((s) => s.id === session?.parent_id)}
         lessons={sessions.filter((s) => s.parent_id === activeId)}
-        materialNames={materialNames}
+        attachments={attachments}
         messages={messages}
         live={run?.live ?? null}
         running={!!run}

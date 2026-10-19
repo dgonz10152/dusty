@@ -1,4 +1,4 @@
-// Course material for exam sessions: what the student uploads, turned into text the tutor reads.
+// Course material: what the student attaches, turned into text the tutor reads.
 
 import type { PDFPageProxy } from "pdfjs-dist";
 import type { ImageData } from "./llm";
@@ -9,18 +9,25 @@ export type Material = { name: string; content: string };
 // (~75k tokens here). Retrieval over chunks is the upgrade path if real courses blow past this.
 export const MAX_MATERIAL_CHARS = 300_000;
 
-/** Why this material can't be used, or null when it's fine. */
-export function materialError(items: Material[]): string | null {
-  const total = items.reduce((n, m) => n + m.content.length, 0);
+/** Why a session with this many characters of material can't run, or null when it's fine. */
+export function materialError(total: number): string | null {
   if (total <= MAX_MATERIAL_CHARS) return null;
   const pct = Math.round((total / MAX_MATERIAL_CHARS) * 100);
   return `That's too much material (${pct}% of the limit). Remove a file or trim it to what the exam covers.`;
 }
 
-/** The message that hands the tutor the material. It goes first in the conversation and is never stored. */
+/** Hands the tutor the material. Built per turn, never stored in the conversation. */
 export function materialMessage(items: Material[]): string {
   const files = items.map((m) => `# file: ${m.name}\n\n${m.content.trim()}`).join("\n\n");
-  return `Here is my course material for the exam. Treat it as the source of truth for what's in scope, and for its notation and definitions.\n\n<course_material>\n${files}\n</course_material>`;
+  return `Here is my course material. Treat it as the source of truth for what's in scope, and for its notation and definitions.\n\n<course_material>\n${files}\n</course_material>`;
+}
+
+/** Puts each file in front of the message it was attached to, as the model sees it. */
+export function withMaterial<M extends { id: number; content: string }>(messages: M[], material: (Material & { message_id: number })[]): M[] {
+  return messages.map((m) => {
+    const files = material.filter((f) => f.message_id === m.id);
+    return files.length ? { ...m, content: `${materialMessage(files)}\n\n${m.content}` } : m;
+  });
 }
 
 export const isImage = (name: string) => /\.(png|jpe?g|gif|webp|heic|heif|bmp|tiff?|avif)$/i.test(name);

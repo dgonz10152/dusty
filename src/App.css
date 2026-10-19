@@ -452,7 +452,7 @@ button:disabled {
   text-align: left;
 }
 
-.empty.dragging .composer {
+.main.dragging .composer {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);
 }
@@ -1115,6 +1115,11 @@ div.tool-chip {
   margin: 0 auto;
 }
 
+.composer-dock .composer-error {
+  max-width: calc(var(--thread-width) - 80px);
+  margin: 10px auto 0;
+}
+
 .composer {
   display: flex;
   flex-direction: column;
@@ -1224,6 +1229,11 @@ div.tool-chip {
   height: 28px;
   margin-left: -6px;
   border-radius: 8px;
+}
+
+.attach-btn:disabled {
+  opacity: 0.35;
+  background: none;
 }
 
 .attach-btn + .model-picker {

@@ -1,7 +1,7 @@
-import { addMessage, getMaterial, getMaterialNames, getMessages, getSession, getSetting, listSessions, renameSession, setDone, type Session } from "./db";
+import { addMessage, getAttachments, getMaterial, getMessages, getSession, getSetting, listSessions, renameSession, setDone, type Session } from "./db";
 import { latestMap } from "./graph";
 import type { Message, Tool, ToolCall } from "./llm";
-import { loadImage, materialMessage, type Material } from "./material";
+import { loadImage, materialMessage, withMaterial, type Material } from "./material";
 import { childContext, EMPTY_PROFILE, examPrompt, RESEARCHER, teacherPrompt, TITLER, TRANSCRIBER, type Profile } from "./prompts";
 import { cleanTitle, titleInput } from "./title";
 import { getProvider, readModel } from "./providers";
@@ -68,23 +68,26 @@ const COMPLETE = fn(
 
 const TEACHER_TOOLS = [QUIZ, ASK, RESEARCH];
 
-/** The prompt, tools, and course material a session runs with: a plain lesson, an exam, or one of an exam's lessons. */
-async function setup(sessionId: string): Promise<{ system: string; tools: Tool[]; material: Material[] }> {
+/**
+ * The prompt and tools a session runs with: a plain lesson, an exam, or one of an exam's lessons.
+ * `inherited` is the exam's material, which an exam's lesson reads ahead of its own conversation.
+ */
+async function setup(sessionId: string): Promise<{ system: string; tools: Tool[]; inherited: Material[] }> {
   const profile = await getSetting<Profile>("profile", EMPTY_PROFILE);
   const session = await getSession(sessionId);
-  if (session?.kind === "exam") return { system: examPrompt(profile), tools: [ASK, RESEARCH], material: await getMaterial(sessionId) };
+  if (session?.kind === "exam") return { system: examPrompt(profile), tools: [ASK, RESEARCH], inherited: [] };
   const exam = session?.parent_id ? await getSession(session.parent_id) : undefined;
-  if (!exam) return { system: teacherPrompt(profile), tools: TEACHER_TOOLS, material: [] };
+  if (!exam) return { system: teacherPrompt(profile), tools: TEACHER_TOOLS, inherited: [] };
   const done = new Set((await listSessions()).filter((s) => s.parent_id === exam.id && s.done && s.node_id).map((s) => s.node_id!));
   const context = childContext(exam.title, latestMap(await getMessages(exam.id)), session!.node_id, done);
-  return { system: `${teacherPrompt(profile)}\n\n${context}`, tools: [...TEACHER_TOOLS, COMPLETE], material: await getMaterial(exam.id) };
+  return { system: `${teacherPrompt(profile)}\n\n${context}`, tools: [...TEACHER_TOOLS, COMPLETE], inherited: await getMaterial(exam.id) };
 }
 
 /** Replaces the placeholder title (the first message) with a short AI summary, like ChatGPT does. */
 async function nameSession(session: Session, messages: Message[]) {
   const { provider: providerId, model } = await readModel();
   const provider = getProvider(providerId);
-  const names = session.kind === "exam" ? await getMaterialNames(session.id) : [];
+  const names = (await getAttachments(session.id)).map((a) => a.name);
   const raw = await provider.complete({ model: provider.quickModel ?? model, system: TITLER, prompt: titleInput(messages, names) });
   const title = cleanTitle(raw);
   if (title) await renameSession(session.id, title);
@@ -109,13 +112,13 @@ export function pendingCall(messages: Message[]): ToolCall | undefined {
   return calls[answered];
 }
 
-/** Adds the student's message, closing out any tool calls a stopped run left unanswered. */
-export async function addUserMessage(sessionId: string, content: string) {
+/** Adds the student's message, closing out any tool calls a stopped run left unanswered. Returns its id. */
+export async function addUserMessage(sessionId: string, content: string): Promise<number> {
   let call: ToolCall | undefined;
   while ((call = pendingCall(await getMessages(sessionId)))) {
     await addMessage(sessionId, { role: "tool", tool_name: call.function.name, content: "Cancelled: the student moved on." });
   }
-  await addMessage(sessionId, { role: "user", content });
+  return addMessage(sessionId, { role: "user", content });
 }
 
 /**
@@ -130,10 +133,11 @@ export async function runAgent(
 ) {
   const { provider: providerId, model } = await readModel();
   const provider = getProvider(providerId);
-  const { system, tools, material } = await setup(sessionId);
+  const { system, tools, inherited } = await setup(sessionId);
   const session = await getSession(sessionId);
-  // The material is sent ahead of the conversation on every turn but never stored in it.
-  const preamble: Message[] = material.length ? [{ role: "user", content: materialMessage(material) }] : [];
+  // Material is sent on every turn but never stored in the conversation.
+  const preamble: Message[] = inherited.length ? [{ role: "user", content: materialMessage(inherited) }] : [];
+  const material = await getMaterial(sessionId);
   try {
     for (;;) {
       const messages = await getMessages(sessionId);
@@ -168,7 +172,7 @@ export async function runAgent(
           await provider.chat({
             model,
             system,
-            messages: [...preamble, ...messages],
+            messages: [...preamble, ...withMaterial(messages, material)],
             tools,
             signal,
             onDelta: (m) => {

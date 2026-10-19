@@ -5,7 +5,7 @@ import Markdown, { ExamMapContext, InlineMath, type ExamMap } from "./Markdown";
 import { QuestionCard, QuizCard } from "./Cards";
 import { INTERACTIVE, pendingCall, transcribeImage, type Live } from "../agent";
 import { PROVIDERS, sameModel } from "../providers";
-import type { ChatMessage, Session } from "../db";
+import type { Attachment, ChatMessage, Session } from "../db";
 import type { DepNode } from "../graph";
 import { extractText, isImage, materialError, type Material } from "../material";
 
@@ -17,7 +17,7 @@ type Props = {
   exam?: Session;
   /** An exam's lessons. */
   lessons: Session[];
-  materialNames: string[];
+  attachments: Attachment[];
   messages: ChatMessage[];
   live: Live | null;
   running: boolean;
@@ -26,7 +26,7 @@ type Props = {
   models: ModelRef[];
   model: ModelRef;
   onModelChange: (model: ModelRef) => void;
-  onSend: (text: string, material?: Material[]) => void;
+  onSend: (text: string, material: Material[]) => void;
   onStop: () => void;
   onAnswer: (call: ToolCall, content: string) => void;
   onRetry: () => void;
@@ -80,7 +80,8 @@ function ToolView({ call, result, onAnswer }: { call: ToolCall; result?: string;
   return null;
 }
 
-type Attachment = { id: string; name: string; content?: string; error?: string };
+/** A file in the composer, before it's sent. */
+type Staged = { id: string; name: string; content?: string; error?: string };
 
 const DOCUMENT = /\.(pdf|txt|md|markdown)$/i;
 // Pastes longer than this become an attachment instead of filling the message box.
@@ -174,7 +175,13 @@ function Composer({
       <div className="composer-bar">
         <div className="composer-tools">
           {onAttach && (
-            <button className="icon-btn attach-btn" aria-label="Add files" title="Add PDFs, pictures, .txt, or .md files" onClick={onAttach}>
+            <button
+              className="icon-btn attach-btn"
+              aria-label="Add files"
+              title="Add PDFs, pictures, .txt, or .md files"
+              disabled={disabled}
+              onClick={onAttach}
+            >
               <Paperclip size={16} />
             </button>
           )}
@@ -215,11 +222,11 @@ function Composer({
 }
 
 export default function Chat(props: Props) {
-  const { session, draftKind, exam, lessons, materialNames, messages, live, running, error, setupHint, onAnswer, onRetry, onOpenSettings } = props;
+  const { session, draftKind, exam, lessons, attachments, messages, live, running, error, setupHint, onAnswer, onRetry, onOpenSettings } = props;
   const scroller = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
   const fileInput = useRef<HTMLInputElement>(null);
-  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [staged, setStaged] = useState<Staged[]>([]);
   const [dragging, setDragging] = useState(false);
 
   useEffect(() => {
@@ -227,12 +234,12 @@ export default function Chat(props: Props) {
     if (el && stick.current) el.scrollTop = el.scrollHeight;
   }, [messages, live]);
 
-  const patch = (id: string, a: Partial<Attachment>) => setAttachments((list) => list.map((x) => (x.id === id ? { ...x, ...a } : x)));
+  const patch = (id: string, a: Partial<Staged>) => setStaged((list) => list.map((x) => (x.id === id ? { ...x, ...a } : x)));
   function attach(files: File[]) {
     for (const file of files) {
       const id = crypto.randomUUID();
       if (isImage(file.name)) {
-        setAttachments((list) => [...list, { id, name: file.name }]);
+        setStaged((list) => [...list, { id, name: file.name }]);
         transcribeImage(file).then(
           (content) => patch(id, { content }),
           (e) =>
@@ -245,10 +252,10 @@ export default function Chat(props: Props) {
         continue;
       }
       if (!DOCUMENT.test(file.name)) {
-        setAttachments((list) => [...list, { id, name: file.name, error: "Only PDFs, pictures, .txt, and .md files" }]);
+        setStaged((list) => [...list, { id, name: file.name, error: "Only PDFs, pictures, .txt, and .md files" }]);
         continue;
       }
-      setAttachments((list) => [...list, { id, name: file.name }]);
+      setStaged((list) => [...list, { id, name: file.name }]);
       extractText(file).then(
         (content) => patch(id, content.replace(/--- Page \d+ ---/g, "").trim() ? { content } : { error: "No text found. Is it a scanned PDF?" }),
         () => patch(id, { error: "Couldn't read this file" }),
@@ -256,15 +263,16 @@ export default function Chat(props: Props) {
     }
   }
   function attachText(content: string) {
-    setAttachments((list) => {
+    setStaged((list) => {
       const n = list.filter((a) => a.name.startsWith("Pasted text")).length;
       return [...list, { id: crypto.randomUUID(), name: n ? `Pasted text ${n + 1}` : "Pasted text", content }];
     });
   }
 
-  const material: Material[] = attachments.filter((a) => a.content).map((a) => ({ name: a.name, content: a.content! }));
-  const loading = attachments.some((a) => a.content === undefined && !a.error);
-  const sizeError = materialError(material);
+  const material: Material[] = staged.filter((a) => a.content).map((a) => ({ name: a.name, content: a.content! }));
+  const loading = staged.some((a) => a.content === undefined && !a.error);
+  // ponytail: an exam lesson's check leaves out the exam's own material; the provider's context error is the backstop
+  const sizeError = materialError([...attachments.map((a) => a.size), ...material.map((m) => m.content.length)].reduce((n, c) => n + c, 0));
 
   const examMap = useMemo<ExamMap | null>(
     () =>
@@ -296,43 +304,45 @@ export default function Chat(props: Props) {
             ? "Reply to Dusty"
             : drafting
               ? "Which exam is it? Add your material with the paperclip, or drop files here"
-              : "Ask Dusty to teach you anything"
+              : "Ask Dusty to teach you anything, or drop in your notes"
       }
       onSend={(text) => {
         stick.current = true;
-        props.onSend(text, drafting ? material : undefined);
+        props.onSend(text, material);
+        setStaged([]);
       }}
-      {...(drafting && {
-        attachments: attachments.length > 0 && (
+      attachments={
+        staged.length > 0 && (
           <div className="attachments">
-            {attachments.map((a) => (
+            {staged.map((a) => (
               <AttachmentChip
                 key={a.id}
                 name={a.name}
                 loading={a.content === undefined && !a.error}
                 error={a.error}
-                onRemove={() => setAttachments((list) => list.filter((x) => x.id !== a.id))}
+                onRemove={() => setStaged((list) => list.filter((x) => x.id !== a.id))}
               />
             ))}
           </div>
-        ),
-        onAttach: () => fileInput.current?.click(),
-        onLongPaste: attachText,
-        canSendEmpty: material.length > 0,
-        blocked: loading || !!sizeError,
-      })}
+        )
+      }
+      onAttach={() => fileInput.current?.click()}
+      onLongPaste={attachText}
+      canSendEmpty={material.length > 0}
+      blocked={loading || !!sizeError}
     />
   );
+  const sizeNotice = sizeError && <div className="composer-error">{sizeError}</div>;
 
-  const firstUser = messages.findIndex((m) => m.role === "user");
   const items = messages.map((m, i) => {
     if (m.role === "user") {
+      const files = attachments.filter((a) => a.message_id === m.id);
       return (
         <div key={m.id} className="msg user">
-          {i === firstUser && materialNames.length > 0 && (
+          {files.length > 0 && (
             <div className="attachments sent">
-              {materialNames.map((name, k) => (
-                <AttachmentChip key={k} name={name} />
+              {files.map((a, k) => (
+                <AttachmentChip key={k} name={a.name} />
               ))}
             </div>
           )}
@@ -360,7 +370,34 @@ export default function Chat(props: Props) {
   });
 
   return (
-    <main className="main">
+    <main
+      className={`main ${dragging ? "dragging" : ""}`}
+      onDragOver={(e) => {
+        if (waitingOnStudent || !e.dataTransfer.types.includes("Files")) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "copy";
+        setDragging(true);
+      }}
+      onDragLeave={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragging(false);
+      }}
+      onDrop={(e) => {
+        e.preventDefault();
+        setDragging(false);
+        attach([...e.dataTransfer.files]);
+      }}
+    >
+      <input
+        ref={fileInput}
+        type="file"
+        multiple
+        hidden
+        accept=".pdf,.txt,.md,.markdown,image/*,.heic,.heif"
+        onChange={(e) => {
+          attach([...(e.currentTarget.files ?? [])]);
+          e.currentTarget.value = "";
+        }}
+      />
       <header className="main-header" data-tauri-drag-region>
         {exam && (
           <>
@@ -378,25 +415,7 @@ export default function Chat(props: Props) {
         </span>
       </header>
       {messages.length === 0 ? (
-        <div
-          className={`empty ${dragging ? "dragging" : ""}`}
-          {...(drafting && {
-            onDragOver: (e: React.DragEvent) => {
-              if (!e.dataTransfer.types.includes("Files")) return;
-              e.preventDefault();
-              e.dataTransfer.dropEffect = "copy";
-              setDragging(true);
-            },
-            onDragLeave: (e: React.DragEvent) => {
-              if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragging(false);
-            },
-            onDrop: (e: React.DragEvent) => {
-              e.preventDefault();
-              setDragging(false);
-              attach([...e.dataTransfer.files]);
-            },
-          })}
-        >
+        <div className="empty">
           <h1>{drafting ? "What's your exam on?" : "What do you want to learn?"}</h1>
           <p className="muted">
             {drafting
@@ -410,21 +429,8 @@ export default function Chat(props: Props) {
           )}
           <div className="empty-composer">
             {composer}
-            {drafting && sizeError && <div className="composer-error">{sizeError}</div>}
+            {sizeNotice}
           </div>
-          {drafting && (
-            <input
-              ref={fileInput}
-              type="file"
-              multiple
-              hidden
-              accept=".pdf,.txt,.md,.markdown,image/*,.heic,.heif"
-              onChange={(e) => {
-                attach([...(e.currentTarget.files ?? [])]);
-                e.currentTarget.value = "";
-              }}
-            />
-          )}
         </div>
       ) : (
         <>
@@ -469,7 +475,10 @@ export default function Chat(props: Props) {
               </div>
             </ExamMapContext>
           </div>
-          <div className="composer-dock">{composer}</div>
+          <div className="composer-dock">
+            {composer}
+            {sizeNotice}
+          </div>
         </>
       )}
     </main>

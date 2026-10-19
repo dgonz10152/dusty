@@ -242,6 +242,18 @@ fn migrations() -> Vec<Migration> {
             CREATE INDEX materials_session ON materials(session_id);
         ",
         kind: MigrationKind::Up,
+    },
+    Migration {
+        version: 4,
+        description: "attach_materials_to_messages",
+        // Material used to belong to the whole exam; it rode along with the first message.
+        sql: "
+            ALTER TABLE materials ADD COLUMN message_id INTEGER;
+            UPDATE materials SET message_id = (
+                SELECT MIN(id) FROM messages WHERE messages.session_id = materials.session_id AND role = 'user'
+            );
+        ",
+        kind: MigrationKind::Up,
     }]
 }
 

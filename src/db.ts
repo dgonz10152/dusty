@@ -95,18 +95,25 @@ export async function setDone(id: string, done: boolean) {
   await (await db()).execute("UPDATE sessions SET done = $1 WHERE id = $2", [done ? 1 : 0, id]);
 }
 
-export async function addMaterial(sessionId: string, m: Material) {
-  await (await db()).execute("INSERT INTO materials (session_id, name, content) VALUES ($1, $2, $3)", [sessionId, m.name, m.content]);
+/** Files attached to a user message. */
+export type Attachment = { message_id: number; name: string; size: number };
+
+export async function addMaterial(sessionId: string, messageId: number, m: Material) {
+  await (await db()).execute("INSERT INTO materials (session_id, message_id, name, content) VALUES ($1, $2, $3, $4)", [
+    sessionId,
+    messageId,
+    m.name,
+    m.content,
+  ]);
 }
 
-export async function getMaterial(sessionId: string): Promise<Material[]> {
-  return (await db()).select("SELECT name, content FROM materials WHERE session_id = $1 ORDER BY id", [sessionId]);
+export async function getMaterial(sessionId: string): Promise<(Material & { message_id: number })[]> {
+  return (await db()).select("SELECT message_id, name, content FROM materials WHERE session_id = $1 ORDER BY id", [sessionId]);
 }
 
-/** Just the file names, without loading the text. */
-export async function getMaterialNames(sessionId: string): Promise<string[]> {
-  const rows: { name: string }[] = await (await db()).select("SELECT name FROM materials WHERE session_id = $1 ORDER BY id", [sessionId]);
-  return rows.map((r) => r.name);
+/** What's attached, without loading the text. */
+export async function getAttachments(sessionId: string): Promise<Attachment[]> {
+  return (await db()).select("SELECT message_id, name, length(content) AS size FROM materials WHERE session_id = $1 ORDER BY id", [sessionId]);
 }
 
 export async function listFolders(): Promise<Folder[]> {
@@ -149,10 +156,11 @@ export async function getMessages(sessionId: string): Promise<ChatMessage[]> {
   }));
 }
 
-export async function addMessage(sessionId: string, m: Message) {
+/** Returns the new message's id. */
+export async function addMessage(sessionId: string, m: Message): Promise<number> {
   const d = await db();
   const now = Date.now();
-  await d.execute(
+  const { lastInsertId } = await d.execute(
     "INSERT INTO messages (session_id, role, content, thinking, tool_calls, tool_name, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7)",
     [
       sessionId,
@@ -165,6 +173,7 @@ export async function addMessage(sessionId: string, m: Message) {
     ],
   );
   await d.execute("UPDATE sessions SET updated_at = $1 WHERE id = $2", [now, sessionId]);
+  return lastInsertId!;
 }
 
 export async function getSetting<T>(key: string, fallback: T): Promise<T> {
