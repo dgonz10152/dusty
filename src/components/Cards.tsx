@@ -1,7 +1,8 @@
 import { useMemo, useState } from "react";
-import { Check, Lightbulb, X } from "lucide-react";
+import { Check, Lightbulb, MessageCircleQuestionMark, X } from "lucide-react";
 import Markdown from "./Markdown";
-import { gradeQuiz, normalizeOptions, parseQuizArgs, type Option, type QuizResult } from "../quiz";
+import { askHint } from "../agent";
+import { gradeQuiz, normalizeOptions, parseQuizArgs, type Hint, type Option, type QuizResult } from "../quiz";
 
 type CardProps = {
   args: Record<string, unknown>;
@@ -29,6 +30,15 @@ function parse<T>(json?: string): T | undefined {
   } catch {
     return undefined;
   }
+}
+
+function Hints({ hints }: { hints: Hint[] }) {
+  return hints.map((h, i) => (
+    <div key={i} className="card-hint">
+      <div className="card-hint-question">You asked: {h.question}</div>
+      <Markdown text={h.answer} />
+    </div>
+  ));
 }
 
 function useSelection(multi: boolean) {
@@ -79,7 +89,27 @@ export function QuizCard({ args: raw, result, onAnswer, fromBasics }: CardProps 
   const answer = parse<QuizResult>(result);
   const [selected, toggle] = useSelection(args.multiSelect);
   const [note, setNote] = useState("");
-  const submit = (pick: string[] | null) => onAnswer(JSON.stringify(gradeQuiz(args, pick, note)));
+  const [hints, setHints] = useState<Hint[]>([]);
+  // null while the "Ask a question" box is closed.
+  const [draft, setDraft] = useState<string | null>(null);
+  const [hintState, setHintState] = useState<"idle" | "waiting" | "failed">("idle");
+  const waiting = hintState === "waiting";
+  const submit = (pick: string[] | null, result?: "from_basics") =>
+    onAnswer(JSON.stringify({ ...gradeQuiz(args, pick, note, hints), ...(result && { result }) }));
+
+  async function ask() {
+    const question = draft?.trim();
+    if (!question || waiting) return;
+    setHintState("waiting");
+    try {
+      const answer = await askHint(args, question);
+      setHints((h) => [...h, { question, answer }]);
+      setDraft(null);
+      setHintState("idle");
+    } catch {
+      setHintState("failed");
+    }
+  }
 
   const markFor = (v: string): Mark | undefined => {
     if (!answer) return undefined;
@@ -126,11 +156,37 @@ export function QuizCard({ args: raw, result, onAnswer, fromBasics }: CardProps 
               }[answer.result]
             }
           </div>
+          {answer.hints && <Hints hints={answer.hints} />}
           {answer.note && <div className="card-note">Your note: {answer.note}</div>}
           <Markdown text={args.explanation} />
         </div>
       ) : (
         <>
+          <Hints hints={hints} />
+          {draft !== null && (
+            <div className="card-ask">
+              <textarea
+                className="card-input"
+                rows={1}
+                autoFocus
+                placeholder="What's unclear? Dusty won't give away the answer"
+                value={draft}
+                disabled={waiting}
+                onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                    e.preventDefault();
+                    ask();
+                  }
+                  if (e.key === "Escape" && !waiting) setDraft(null);
+                }}
+              />
+              <button className="btn primary" disabled={!draft.trim() && !waiting} onClick={ask}>
+                {waiting ? <span className="dot-pulse small" /> : "Ask"}
+              </button>
+            </div>
+          )}
+          {hintState === "failed" && <div className="error-text">Couldn't get an answer. Try again.</div>}
           <input
             className="card-input"
             placeholder="Add a note (optional)"
@@ -138,18 +194,22 @@ export function QuizCard({ args: raw, result, onAnswer, fromBasics }: CardProps 
             onChange={(e) => setNote(e.target.value)}
           />
           <div className="card-actions">
-            {fromBasics && (
-              <button
-                className="btn ghost from-basics"
-                onClick={() => onAnswer(JSON.stringify({ ...gradeQuiz(args, null, note), result: "from_basics" }))}
-              >
-                Teach me from the basics
-              </button>
-            )}
-            <button className="btn ghost" onClick={() => submit(null)}>
+            <div className="card-actions-left">
+              {fromBasics && (
+                <button className="btn ghost" disabled={waiting} onClick={() => submit(null, "from_basics")}>
+                  Teach me from the basics
+                </button>
+              )}
+              {draft === null && (
+                <button className="btn ghost" onClick={() => setDraft("")}>
+                  <MessageCircleQuestionMark size={14} /> Ask a question
+                </button>
+              )}
+            </div>
+            <button className="btn ghost" disabled={waiting} onClick={() => submit(null)}>
               I don't know
             </button>
-            <button className="btn primary" disabled={!selected.length} onClick={() => submit(selected)}>
+            <button className="btn primary" disabled={!selected.length || waiting} onClick={() => submit(selected)}>
               Submit
             </button>
           </div>

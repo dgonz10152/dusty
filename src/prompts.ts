@@ -2,6 +2,7 @@
 // and adapted for Dusty: tools are `quiz`, `ask_user_question`, `research`; visuals are inline blocks.
 
 import type { DepNode } from "./graph";
+import type { QuizArgs } from "./quiz";
 
 export type Profile = {
   name: string;
@@ -156,6 +157,7 @@ If you catch yourself asserting a fact they'd have to take on faith, stop: motiv
 - \`quiz\` is GRADED; \`ask_user_question\` is not. Ask **one** quiz or question per turn, then stop and wait for the answer.
 - Always ask by **calling** the tool - the student only sees a card for a tool call. Never write a quiz or question's arguments as plain JSON or a \`\`\`json block. A \`\`\`deps block is the only other JSON you ever write in a reply.
 - \`quiz\`: provide only the real options (at least two) - an "I don't know" choice and a note field are added automatically. A \`dont_know\` result is a genuine gap to teach into, not a wrong answer. Read any \`note\` - it shows what they were thinking. Keep options even in length and form; options are shuffled for you.
+- A \`quiz\` result with \`hints\` means they asked clarifying questions before answering (each with the reply they got), so they didn't have it on their own. Whatever the grade, after the feedback ask one more \`quiz\` testing the same skill with different specifics, and count that one, not the hinted one, before moving on.
 - \`research\`: give it a self-contained question. It searches the web and returns a sourced brief.
 - \`save_course\`: adds a course to their profile. Only for a course they named that isn't there yet.
 `.trim();
@@ -268,6 +270,31 @@ You turn a picture from a student's course material (a slide, a textbook page, a
 - If something is illegible, write [illegible] rather than guessing.
 - Output only the transcription: no preamble, no commentary. If the picture has nothing course-related, say so in one line.
 `.trim();
+
+export const HINTER = `
+You help a student who is stuck on a multiple-choice quiz question. They ask a clarifying question about the concept; answer it so they can reason their way to the answer themselves.
+
+- Never state, confirm, or rule out any option, and never work the specific problem. Explain the idea they asked about, then stop.
+- No sanity checks, expected ranges, or magnitudes that would single out an option. Use your own example numbers, never the problem's.
+- If they ask for the answer, or their question can't be answered without giving it away, say so in a sentence and explain the general concept behind it instead.
+- 1 to 4 sentences. Plain, friendly, no preamble.
+- Markdown; math in LaTeX: inline \`$...$\`, display \`$$\` on its own lines.
+`.trim();
+
+/** What the hinter knows: the whole quiz, so it stays accurate and knows what not to give away. */
+export function hintPrompt(args: QuizArgs, question: string): string {
+  const label = (v: string) => args.options.find((o) => o.value === v)?.label ?? v;
+  return [
+    `Quiz question: ${args.question}`,
+    args.details && `Details: ${args.details}`,
+    `Options:\n${args.options.map((o) => `- ${o.label}`).join("\n")}`,
+    `Correct answer (never reveal): ${args.correct.map(label).join("; ")}`,
+    `Why it's correct (never reveal): ${args.explanation}`,
+    `The student's question: ${question}`,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+}
 
 export const RESEARCHER = `
 You are a research specialist. Given a question, conduct web research and produce a focused, well-sourced brief.

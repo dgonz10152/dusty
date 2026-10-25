@@ -8,6 +8,9 @@ test("grading", () => {
   assert.equal(gradeQuiz(single, ["Venus"]).result, "wrong");
   assert.equal(gradeQuiz(single, null, " unsure ").result, "dont_know");
   assert.equal(gradeQuiz(single, null, " unsure ").note, "unsure");
+  assert.equal("hints" in gradeQuiz(single, ["Mercury"]), false);
+  const hints = [{ question: "What's closest to the sun?", answer: "Think about orbits." }];
+  assert.deepEqual(gradeQuiz(single, ["Mercury"], "", hints).hints, hints);
 
   // correctAnswer given as a label, options as a JSON string
   const multi = parseQuizArgs({

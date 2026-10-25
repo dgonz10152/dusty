@@ -978,10 +978,53 @@ div.tool-chip {
   cursor: default;
 }
 
+/* Drawn here, not natively: WebKit's dark-mode radio with a light accent reads as a bare dot. */
 .option input {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
   margin: 0;
-  accent-color: var(--primary);
   flex-shrink: 0;
+  display: grid;
+  place-content: center;
+  border: 1.5px solid var(--text-muted);
+  border-radius: 50%;
+  cursor: inherit;
+}
+
+.option input[type="checkbox"] {
+  border-radius: 4px;
+}
+
+.option input:checked {
+  border-color: var(--primary);
+}
+
+.option input[type="radio"]:checked::after {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--primary);
+}
+
+.option input[type="checkbox"]:checked {
+  background: var(--primary);
+}
+
+.option input[type="checkbox"]:checked::after {
+  content: "";
+  width: 4px;
+  height: 8px;
+  margin-top: -2px;
+  border: solid var(--primary-text);
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
+.option input:disabled {
+  opacity: 0.6;
 }
 
 .option-label {
@@ -1040,12 +1083,62 @@ div.tool-chip {
 
 .card-actions {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
   gap: 8px;
 }
 
-.card-actions .from-basics {
+.card-actions-left {
+  display: flex;
+  gap: 8px;
   margin-right: auto;
+}
+
+.card-actions-left .btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.card-feedback .card-hint {
+  margin-bottom: 8px;
+}
+
+.card-hint {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--bg-hover);
+}
+
+.card-hint-question {
+  margin-bottom: 4px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.card-ask {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.card-ask .card-input {
+  flex: 1;
+  resize: none;
+}
+
+.card-ask .btn {
+  min-width: 64px;
+  height: auto;
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.card-ask .dot-pulse.small {
+  margin: 0;
+  background: currentColor;
 }
 
 .card-feedback {
@@ -1092,9 +1185,13 @@ div.tool-chip {
   color: var(--text-muted);
 }
 
-.btn.ghost:hover {
+.btn.ghost:hover:not(:disabled) {
   background: var(--bg-hover);
   color: var(--text);
+}
+
+.btn.ghost:disabled {
+  opacity: 0.5;
 }
 
 /* Composer */

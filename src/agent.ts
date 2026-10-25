@@ -2,10 +2,10 @@ import { addMessage, getAttachments, getMaterial, getMessages, getSession, getSe
 import { latestMap } from "./graph";
 import type { Message, Tool, ToolCall } from "./llm";
 import { loadImage, materialMessage, withMaterial, type Material } from "./material";
-import { addCourse, childContext, EMPTY_PROFILE, examPrompt, RESEARCHER, teacherPrompt, TITLER, TRANSCRIBER, type Profile } from "./prompts";
+import { addCourse, childContext, EMPTY_PROFILE, HINTER, hintPrompt, examPrompt, RESEARCHER, teacherPrompt, TITLER, TRANSCRIBER, type Profile } from "./prompts";
 import { cleanTitle, titleInput } from "./title";
 import { getProvider, readModel } from "./providers";
-import { salvageToolCall } from "./quiz";
+import { salvageToolCall, type QuizArgs } from "./quiz";
 
 /** Tools answered by the student through a card in the chat; the loop stops and resumes on answer. */
 export const INTERACTIVE = new Set(["quiz", "ask_user_question"]);
@@ -23,7 +23,7 @@ const optionsSchema = {
 
 const QUIZ = fn(
   "quiz",
-  "Ask the student a GRADED multiple-choice question with a known correct answer. The app grades it, reveals the answer and your explanation, and returns the result (correct / wrong / dont_know, plus an optional note; from_basics means they asked to be taught from the basics). Use it to probe their level and to check each node landed. An 'I don't know' choice is added automatically - never add your own.",
+  "Ask the student a GRADED multiple-choice question with a known correct answer. The app grades it, reveals the answer and your explanation, and returns the result (correct / wrong / dont_know, plus an optional note and any hints they asked for; from_basics means they asked to be taught from the basics). Use it to probe their level and to check each node landed. An 'I don't know' choice is added automatically - never add your own.",
   {
     question: { type: "string" },
     details: { type: "string", description: "Optional context shown under the question." },
@@ -98,6 +98,13 @@ async function nameSession(session: Session, messages: Message[]) {
   const raw = await provider.complete({ model: provider.quickModel ?? model, system: TITLER, prompt: titleInput(messages, names) });
   const title = cleanTitle(raw);
   if (title) await renameSession(session.id, title);
+}
+
+/** Answers a student's clarifying question on a quiz without giving the answer away. */
+export async function askHint(args: QuizArgs, question: string): Promise<string> {
+  // The selected model, not the quick one: a wrong hint is worse than a slow one.
+  const { provider, model } = await readModel();
+  return (await getProvider(provider).complete({ model, system: HINTER, prompt: hintPrompt(args, question) })).trim();
 }
 
 /** Turns a picture of course material into text with the selected model. */
