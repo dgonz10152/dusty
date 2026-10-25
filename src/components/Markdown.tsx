@@ -1,11 +1,28 @@
-import { memo, useEffect, useId, useState } from "react";
+import { createContext, memo, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { ChevronDown, ChevronRight, CircleCheck, CircleDot } from "lucide-react";
+import { DynamicIcon, iconNames, type IconName } from "lucide-react/dynamic";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import katex from "katex";
 import "katex/dist/katex.min.css";
 import { normalizeMath, rehypeMathPunctuation } from "../math";
+import { layers, parseDeps, type DepNode } from "../graph";
+
+export type LessonStatus = "todo" | "started" | "done";
+
+/** In an exam session, every map node is a lesson the student can open and check off. */
+export type ExamMap = {
+  statusOf: (nodeId: string) => LessonStatus;
+  onStudy: (node: DepNode) => void;
+  onToggleDone: (node: DepNode) => void;
+};
+
+export const ExamMapContext = createContext<ExamMap | null>(null);
+
+const STATUS_LABEL: Record<LessonStatus, string> = { todo: "Not started", started: "In progress", done: "Done" };
 
 // Loaded on first diagram; mermaid is the heaviest dependency by far.
 async function renderMermaid(id: string, code: string) {
@@ -15,7 +32,9 @@ async function renderMermaid(id: string, code: string) {
     startOnLoad: false,
     securityLevel: "strict",
     theme: "base",
+    look: "classic",
     themeVariables: {
+      useGradient: false,
       fontFamily: getComputedStyle(document.documentElement).fontFamily,
       fontSize: "14px",
       background: "transparent",
@@ -49,6 +68,155 @@ function Mermaid({ code }: { code: string }) {
   return <div className="visual" dangerouslySetInnerHTML={{ __html: svg }} />;
 }
 
+/**
+ * A one-line label or title with its $...$ math typeset and everything else as plain text. Full Markdown would
+ * turn a title like "1. Limits" into a list.
+ */
+export function InlineMath({ text }: { text: string }) {
+  const parts = normalizeMath(text).split(/(\$\$[^$]+\$\$|\$[^$\n]+\$)/);
+  return parts.map((part, i) => {
+    if (i % 2 === 0) return part;
+    const tex = part.replace(/^\$+|\$+$/g, "");
+    return <span key={i} dangerouslySetInnerHTML={{ __html: katex.renderToString(tex, { throwOnError: false }) }} />;
+  });
+}
+
+const ICONS = new Set<string>(iconNames);
+
+// Edges drop from the source to their bus, run across, and drop onto the target's top.
+function elbow(x1: number, y1: number, x2: number, y2: number, bus: number) {
+  const dx = x2 - x1;
+  if (Math.abs(dx) < 1) return `M${x1} ${y1}V${y2}`;
+  const r = Math.min(8, Math.abs(dx) / 2);
+  const s = Math.sign(dx);
+  return `M${x1} ${y1}V${bus - r}Q${x1} ${bus} ${x1 + s * r} ${bus}H${x2 - s * r}Q${x2} ${bus} ${x2} ${bus + r}V${y2}`;
+}
+
+type DrawnEdge = { from: string; to: string; d: string };
+
+function DepGraph({ code }: { code: string }) {
+  const graph = useMemo(() => {
+    try {
+      return layers(parseDeps(code));
+    } catch {
+      return null;
+    }
+  }, [code]);
+  const exam = useContext(ExamMapContext);
+  const [open, setOpen] = useState<string | null>(null);
+  const [edges, setEdges] = useState<DrawnEdge[]>([]);
+  const canvas = useRef<HTMLDivElement>(null);
+
+  useLayoutEffect(() => {
+    const root = canvas.current;
+    if (!root || !graph) return;
+    const rowOf = new Map(graph.rows.flatMap((row, i) => row.map((n) => [n.id, i] as const)));
+    const vias = new Set(graph.rows.flat().filter((n) => n.via).map((n) => n.id));
+    const measure = () => {
+      const base = root.getBoundingClientRect();
+      const box = (id: string) => root.querySelector(`[data-id="${CSS.escape(id)}"]`)!.getBoundingClientRect();
+      const rows = [...root.querySelectorAll(".dep-row")].map((el) => el.getBoundingClientRect());
+      const midX = (id: string) => {
+        const r = box(id);
+        return r.left - base.left + r.width / 2;
+      };
+      // A source that forks gets its own bus; edges from single-target sources share their target's merge bus.
+      // Each bus in a gap sits at its own height, so unrelated horizontals never line up.
+      const segments = graph.edges.flatMap(({ chain }) => chain.slice(1).map((to, i) => [chain[i], to] as const));
+      const targets = new Map<string, Set<string>>();
+      for (const [from, to] of segments) targets.set(from, (targets.get(from) ?? new Set()).add(to));
+      const busKey = (from: string, to: string) => (targets.get(from)!.size > 1 ? from : to);
+      const keysByGap = new Map<number, Set<string>>();
+      for (const [from, to] of segments) {
+        const gap = rowOf.get(from)!;
+        keysByGap.set(gap, (keysByGap.get(gap) ?? new Set()).add(busKey(from, to)));
+      }
+      const bus = (from: string, to: string) => {
+        const gap = rowOf.get(from)!;
+        const keys = [...keysByGap.get(gap)!].sort((a, b) => midX(a) - midX(b));
+        const top = rows[gap].bottom - base.top;
+        return top + ((keys.indexOf(busKey(from, to)) + 1) * (rows[gap + 1].top - rows[gap].bottom)) / (keys.length + 1);
+      };
+      setEdges(
+        graph.edges.map(({ from, to, chain }) => ({
+          from,
+          to,
+          d: chain
+            .slice(1)
+            .map((id, i) => {
+              // A via slot spans its whole row, so the edge leaves from its top to pass straight through.
+              const start = box(chain[i]);
+              const y1 = (vias.has(chain[i]) ? start.top : start.bottom) - base.top;
+              return elbow(midX(chain[i]), y1, midX(id), box(id).top - base.top, bus(chain[i], id));
+            })
+            .join(""),
+        })),
+      );
+    };
+    const ro = new ResizeObserver(measure);
+    ro.observe(root);
+    root.querySelectorAll("[data-id]").forEach((el) => ro.observe(el));
+    return () => ro.disconnect();
+  }, [graph]);
+
+  if (!graph) return <CodeBlock code={code} lang="deps" />;
+  const lit = (e: DrawnEdge) => e.from === open || e.to === open;
+  return (
+    <div className="visual dep-graph">
+      <div className="dep-canvas" ref={canvas}>
+        <svg className="dep-edges" aria-hidden>
+          {[...edges.filter((e) => !lit(e)), ...edges.filter(lit)].map((e) => (
+            <path key={`${e.from}>${e.to}`} d={e.d} className={lit(e) ? "lit" : undefined} />
+          ))}
+        </svg>
+        {graph.rows.map((row, i) => (
+          <div className="dep-row" key={i}>
+            {row.map((n) => {
+              if (n.via) return <div key={n.id} data-id={n.id} className="dep-via" />;
+              const isOpen = open === n.id;
+              const Chevron = isOpen ? ChevronDown : ChevronRight;
+              const status = exam?.statusOf(n.id);
+              const Mark = status === "done" ? CircleCheck : status === "started" ? CircleDot : null;
+              return (
+                <div key={n.id} data-id={n.id} className={`dep-card${isOpen ? " open" : ""}${status ? ` ${status}` : ""}`}>
+                  <button className="dep-head" aria-expanded={isOpen} onClick={() => setOpen(isOpen ? null : n.id)}>
+                    <DynamicIcon name={(ICONS.has(n.icon) ? n.icon : "circle-dot") as IconName} size={16} className="dep-icon" />
+                    <span className="dep-label">
+                      <InlineMath text={n.label} />
+                    </span>
+                    {Mark && <Mark size={14} className="dep-status" aria-label={STATUS_LABEL[status!]} />}
+                    <Chevron size={14} className="dep-chevron" />
+                  </button>
+                  {isOpen && (n.summary || exam) && (
+                    <div className="dep-summary">
+                      {n.summary && (
+                        <>
+                          <div className="dep-kind">Summary</div>
+                          <Markdown text={n.summary} />
+                        </>
+                      )}
+                      {exam && status && (
+                        <div className="dep-actions">
+                          <button className="btn primary small" onClick={() => exam.onStudy(n)}>
+                            {status === "todo" ? "Start lesson" : "Open lesson"}
+                          </button>
+                          <button className="btn ghost small" onClick={() => exam.onToggleDone(n)}>
+                            {status === "done" ? "Mark not done" : "Mark done"}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function Svg({ code }: { code: string }) {
   // An <img> never runs scripts inside the SVG, so model output is safe to show as-is.
   const doc = code.includes("xmlns") ? code : code.replace("<svg", '<svg xmlns="http://www.w3.org/2000/svg"');
@@ -57,6 +225,20 @@ function Svg({ code }: { code: string }) {
       <img alt="" src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(doc)}`} />
     </div>
   );
+}
+
+type MdNode = { type: string; value?: string; children?: MdNode[] };
+
+// Models put <br> in table cells, where Markdown has no line breaks. Raw HTML isn't rendered,
+// so turn just those tags into real breaks instead of showing them as text.
+function remarkBrTags() {
+  const walk = (node: MdNode) => {
+    node.children?.forEach((child, i) => {
+      if (child.type === "html" && /^<br\s*\/?>$/i.test(child.value ?? "")) node.children![i] = { type: "break" };
+      else walk(child);
+    });
+  };
+  return walk;
 }
 
 const CodeBlock = ({ code, lang }: { code: string; lang?: string }) => (
@@ -75,6 +257,7 @@ function Markdown({ text, streaming = false }: { text: string; streaming?: boole
       // Partial diagrams don't parse, so visuals render once the message is complete.
       if (lang === "mermaid" && !streaming) return <Mermaid code={code} />;
       if (lang === "svg" && !streaming) return <Svg code={code} />;
+      if (lang === "deps" && !streaming) return <DepGraph code={code} />;
       return <CodeBlock code={code} lang={lang} />;
     },
     a: ({ href, children }) => (
@@ -91,7 +274,7 @@ function Markdown({ text, streaming = false }: { text: string; streaming?: boole
   };
   return (
     <div className="markdown">
-      <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex, rehypeMathPunctuation]} components={components}>
+      <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath, remarkBrTags]} rehypePlugins={[rehypeKatex, rehypeMathPunctuation]} components={components}>
         {normalizeMath(text)}
       </ReactMarkdown>
     </div>

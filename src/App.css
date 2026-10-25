@@ -16,10 +16,12 @@
   --green-bg: rgba(22, 163, 74, 0.09);
   --red: #b91c1c;
   --red-bg: rgba(220, 38, 38, 0.08);
+  --amber: #b45309;
   --amber-bg: rgba(217, 119, 6, 0.09);
+  --accent: #7c3aed;
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 4px 16px rgba(0, 0, 0, 0.06);
   --radius: 12px;
-  --thread-width: 760px;
+  --thread-width: 880px;
 
   color-scheme: light dark;
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", "Segoe UI", system-ui, sans-serif;
@@ -49,7 +51,9 @@
     --green-bg: rgba(74, 222, 128, 0.08);
     --red: #f87171;
     --red-bg: rgba(248, 113, 113, 0.08);
+    --amber: #fbbf24;
     --amber-bg: rgba(251, 191, 36, 0.08);
+    --accent: #a78bfa;
     --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.3);
   }
 }
@@ -112,11 +116,33 @@ button:disabled {
   border-right: 1px solid var(--border);
   user-select: none;
   -webkit-user-select: none;
+  transition: margin-left 0.2s ease;
 }
 
+.sidebar.closed {
+  margin-left: -261px;
+}
+
+/* Centered on the macOS traffic lights, which sit 16px from the top. */
 .sidebar-top {
   height: 44px;
   flex-shrink: 0;
+  display: flex;
+  justify-content: flex-end;
+  align-items: flex-start;
+  /* Right edge lines up with the "Lessons" row's new-folder button. */
+  padding: 4px 6px 0 0;
+}
+
+.sidebar-toggle {
+  flex-shrink: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar,
+  .main-header {
+    transition: none;
+  }
 }
 
 .nav-item {
@@ -134,10 +160,64 @@ button:disabled {
   background: var(--bg-hover);
 }
 
+.search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  margin: 8px 0 0;
+  padding: 0 4px 0 10px;
+  border-radius: 8px;
+  background: var(--bg-hover);
+  color: var(--text-faint);
+  cursor: text;
+}
+
+.search:focus-within {
+  background: var(--bg-active);
+  color: var(--text-muted);
+}
+
+.search input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+}
+
+.search input::placeholder {
+  color: var(--text-faint);
+}
+
+.search .icon-btn {
+  width: 22px;
+  height: 22px;
+}
+
+.search-empty {
+  padding: 6px 10px;
+  font-size: 13px;
+  color: var(--text-faint);
+}
+
 .sidebar-label {
-  margin: 16px 10px 4px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 12px 6px 2px 10px;
   font-size: 12px;
   color: var(--text-faint);
+}
+
+.sidebar-label .icon-btn {
+  color: var(--text-faint);
+}
+
+.sidebar-label .icon-btn:hover {
+  color: var(--text);
 }
 
 .session-list {
@@ -196,6 +276,87 @@ button:disabled {
   display: flex;
 }
 
+.session.depth-1 {
+  padding-left: 32px;
+}
+
+.session.depth-2 {
+  padding-left: 54px;
+}
+
+.folder-row.depth-1 {
+  padding-left: 28px;
+}
+
+.folder-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  margin: 0 -3px;
+  border-radius: 5px;
+}
+
+.folder-toggle:hover {
+  background: var(--bg-active);
+}
+
+.session-done {
+  flex-shrink: 0;
+  margin-right: 4px;
+  color: var(--green);
+}
+
+.session-list.drop,
+.folder.drop {
+  border-radius: 8px;
+  background: var(--bg-hover);
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+}
+
+.folder-row {
+  gap: 6px;
+  padding-left: 6px;
+  color: var(--text);
+}
+
+.folder-chevron {
+  flex-shrink: 0;
+  color: var(--text-faint);
+  transition: transform 0.15s ease;
+}
+
+.folder-chevron.open {
+  transform: rotate(90deg);
+}
+
+.folder-icon {
+  flex-shrink: 0;
+  margin-right: 2px;
+  color: var(--text-muted);
+}
+
+.folder-input {
+  flex: 1;
+  min-width: 0;
+  height: 24px;
+  margin-left: -5px;
+  padding: 0 4px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--bg-elevated);
+  outline: none;
+}
+
+.folder-empty {
+  height: 28px;
+  padding-left: 32px;
+  font-size: 12px;
+  line-height: 28px;
+  color: var(--text-faint);
+}
+
 .icon-btn {
   display: flex;
   align-items: center;
@@ -225,6 +386,51 @@ button:disabled {
   display: flex;
   align-items: center;
   padding: 0 20px;
+  transition: padding-left 0.2s ease;
+}
+
+/* Clears the traffic lights. */
+.main-header.sidebar-hidden {
+  padding-left: 78px;
+}
+
+.main-header .sidebar-toggle {
+  align-self: flex-start;
+  margin: 4px 12px 0 0;
+}
+
+.crumb {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 40%;
+  height: 28px;
+  margin-left: -8px;
+  padding: 0 8px;
+  border-radius: 8px;
+  color: var(--text-muted);
+}
+
+.crumb span {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.crumb:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.crumb svg {
+  flex-shrink: 0;
+}
+
+.crumb-sep {
+  flex-shrink: 0;
+  margin: 0 4px 0 2px;
+  color: var(--text-faint);
 }
 
 .main-title {
@@ -279,6 +485,17 @@ button:disabled {
   text-align: left;
 }
 
+.main.dragging .composer {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+.composer-error {
+  margin: 10px 16px 0;
+  font-size: 13px;
+  color: var(--red);
+}
+
 .notice {
   margin-top: 20px;
   padding: 8px 14px;
@@ -291,7 +508,9 @@ button:disabled {
 
 .msg.user {
   display: flex;
-  justify-content: flex-end;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
 }
 
 .bubble {
@@ -489,21 +708,38 @@ div.tool-chip {
 }
 
 .markdown table {
-  border-collapse: collapse;
   display: block;
+  width: fit-content;
+  max-width: 100%;
   overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  border-spacing: 0;
 }
 
 .markdown th,
 .markdown td {
-  padding: 6px 12px;
-  border: 1px solid var(--border);
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
   text-align: left;
+  vertical-align: top;
+  /* Unlike the .markdown default, this never shrinks a column into letter-by-letter wrapping. */
+  overflow-wrap: break-word;
+}
+
+.markdown tr:last-child td {
+  border-bottom: none;
 }
 
 .markdown th {
   background: var(--bg-subtle);
+  font-size: 13px;
   font-weight: 600;
+  color: var(--text-muted);
+}
+
+.markdown td:first-child {
+  min-width: 120px;
 }
 
 .inline-code {
@@ -556,6 +792,159 @@ div.tool-chip {
 
 .visual-loading {
   height: 120px;
+}
+
+/* Dependency graph */
+
+.dep-graph {
+  display: block;
+  overflow-y: hidden;
+  padding: 28px 20px;
+}
+
+.dep-canvas {
+  position: relative;
+  min-width: min-content;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 40px;
+}
+
+.dep-edges {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.dep-edges path {
+  fill: none;
+  stroke: var(--border-strong);
+  stroke-width: 1.5;
+}
+
+.dep-edges path.lit {
+  stroke: var(--accent);
+}
+
+.dep-row {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.dep-via {
+  align-self: stretch;
+  width: 8px;
+}
+
+.dep-card {
+  min-width: 128px;
+  max-width: 184px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  /* Translucent, so cards read as a tint over the canvas. */
+  background: color-mix(in srgb, var(--text) 5%, transparent);
+}
+
+.dep-card.open {
+  flex-basis: 216px;
+  min-width: 180px;
+  max-width: none;
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+.dep-card.open .dep-head {
+  border-radius: 9px 9px 0 0;
+}
+
+.dep-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 42px;
+  padding: 8px 10px 8px 12px;
+  border-radius: 9px;
+  text-align: left;
+}
+
+.dep-head:hover {
+  background: var(--bg-hover);
+}
+
+.dep-head:focus-visible {
+  outline-offset: -2px;
+}
+
+.dep-icon {
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+
+.dep-card.open .dep-icon {
+  color: var(--accent);
+}
+
+.dep-label {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.35;
+  overflow-wrap: break-word;
+}
+
+.dep-chevron {
+  flex-shrink: 0;
+  color: var(--text-faint);
+}
+
+.dep-status {
+  flex-shrink: 0;
+  color: var(--accent);
+}
+
+.dep-card.done {
+  border-color: color-mix(in srgb, var(--green) 45%, transparent);
+}
+
+.dep-card.done .dep-status {
+  color: var(--green);
+}
+
+.dep-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.btn.small {
+  height: 28px;
+  padding: 0 10px;
+  font-size: 13px;
+}
+
+.dep-summary {
+  padding: 10px 12px 12px;
+  border-top: 1px solid var(--border);
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.dep-kind {
+  margin-bottom: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
 }
 
 /* Cards */
@@ -622,10 +1011,53 @@ div.tool-chip {
   cursor: default;
 }
 
+/* Drawn here, not natively: WebKit's dark-mode radio with a light accent reads as a bare dot. */
 .option input {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
   margin: 0;
-  accent-color: var(--primary);
   flex-shrink: 0;
+  display: grid;
+  place-content: center;
+  border: 1.5px solid var(--text-muted);
+  border-radius: 50%;
+  cursor: inherit;
+}
+
+.option input[type="checkbox"] {
+  border-radius: 4px;
+}
+
+.option input:checked {
+  border-color: var(--primary);
+}
+
+.option input[type="radio"]:checked::after {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--primary);
+}
+
+.option input[type="checkbox"]:checked {
+  background: var(--primary);
+}
+
+.option input[type="checkbox"]:checked::after {
+  content: "";
+  width: 4px;
+  height: 8px;
+  margin-top: -2px;
+  border: solid var(--primary-text);
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
+.option input:disabled {
+  opacity: 0.6;
 }
 
 .option-label {
@@ -642,6 +1074,17 @@ div.tool-chip {
 .option.right .mark,
 .option.missed .mark {
   color: var(--green);
+}
+
+.option.reveal {
+  border-color: transparent;
+  background: var(--amber-bg);
+}
+
+.option.reveal .mark,
+.card.dont_know .verdict,
+.card.from_basics .verdict {
+  color: var(--amber);
 }
 
 .option.wrong {
@@ -673,8 +1116,62 @@ div.tool-chip {
 
 .card-actions {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
   gap: 8px;
+}
+
+.card-actions-left {
+  display: flex;
+  gap: 8px;
+  margin-right: auto;
+}
+
+.card-actions-left .btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.card-feedback .card-hint {
+  margin-bottom: 8px;
+}
+
+.card-hint {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--bg-hover);
+}
+
+.card-hint-question {
+  margin-bottom: 4px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.card-ask {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.card-ask .card-input {
+  flex: 1;
+  resize: none;
+}
+
+.card-ask .btn {
+  min-width: 64px;
+  height: auto;
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.card-ask .dot-pulse.small {
+  margin: 0;
+  background: currentColor;
 }
 
 .card-feedback {
@@ -721,9 +1218,13 @@ div.tool-chip {
   color: var(--text-muted);
 }
 
-.btn.ghost:hover {
+.btn.ghost:hover:not(:disabled) {
   background: var(--bg-hover);
   color: var(--text);
+}
+
+.btn.ghost:disabled {
+  opacity: 0.5;
 }
 
 /* Composer */
@@ -749,6 +1250,11 @@ div.tool-chip {
   margin: 0 auto;
 }
 
+.composer-dock .composer-error {
+  max-width: calc(var(--thread-width) - 80px);
+  margin: 10px auto 0;
+}
+
 .composer {
   display: flex;
   flex-direction: column;
@@ -762,6 +1268,67 @@ div.tool-chip {
 .composer.disabled {
   box-shadow: none;
   border-color: var(--border);
+}
+
+.attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: -2px -4px 10px;
+}
+
+.attachments.sent {
+  justify-content: flex-end;
+  max-width: 80%;
+  margin: 0;
+}
+
+.attachment {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 260px;
+  height: 30px;
+  padding: 0 4px 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-subtle);
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.attachments.sent .attachment {
+  padding-right: 10px;
+}
+
+.attachment > svg,
+.attachment > .dot-pulse {
+  flex-shrink: 0;
+}
+
+.attachment-name {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--text);
+}
+
+.attachment.failed {
+  max-width: 100%;
+  border-color: color-mix(in srgb, var(--red) 30%, transparent);
+  background: var(--red-bg);
+}
+
+.attachment-error {
+  flex-shrink: 0;
+  color: var(--red);
+}
+
+.attachment .icon-btn {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
 }
 
 .composer textarea {
@@ -783,6 +1350,29 @@ div.tool-chip {
   align-items: center;
   justify-content: space-between;
   margin-top: 8px;
+}
+
+.composer-tools {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.attach-btn {
+  width: 28px;
+  height: 28px;
+  margin-left: -6px;
+  border-radius: 8px;
+}
+
+.attach-btn:disabled {
+  opacity: 0.35;
+  background: none;
+}
+
+.attach-btn + .model-picker {
+  margin-left: 0;
 }
 
 .model-picker {

@@ -1,3 +1,5 @@
+import type { Message } from "./llm";
+
 export type Option = { label: string; value: string };
 
 export type QuizArgs = {
@@ -10,11 +12,16 @@ export type QuizArgs = {
   shuffle: boolean;
 };
 
+/** A clarifying question the student asked before answering, and the reply they got. */
+export type Hint = { question: string; answer: string };
+
 export type QuizResult = {
-  result: "correct" | "wrong" | "dont_know";
+  /** `from_basics`: the student asked to be taught from the basics instead of answering. */
+  result: "correct" | "wrong" | "dont_know" | "from_basics";
   selected: string[];
   correctAnswer: string[];
   note?: string;
+  hints?: Hint[];
 };
 
 // Models send loose shapes: options as strings or JSON strings, correctAnswer as a label instead of a value.
@@ -56,10 +63,27 @@ function maybeJson(v: unknown): unknown {
 }
 
 /** `selected === null` means "I don't know". Multi-select is an exact-set match. */
-export function gradeQuiz(args: QuizArgs, selected: string[] | null, note?: string): QuizResult {
-  const base = { correctAnswer: args.correct, ...(note?.trim() && { note: note.trim() }) };
+export function gradeQuiz(args: QuizArgs, selected: string[] | null, note?: string, hints: Hint[] = []): QuizResult {
+  const base = { correctAnswer: args.correct, ...(note?.trim() && { note: note.trim() }), ...(hints.length && { hints }) };
   if (selected === null) return { result: "dont_know", selected: [], ...base };
   const want = new Set(args.correct);
   const ok = selected.length === want.size && selected.every((s) => want.has(s));
   return { result: ok ? "correct" : "wrong", selected, ...base };
+}
+
+// A model sometimes writes a quiz or question as a JSON block ending its reply instead of calling the tool
+// (seen after a ```deps block primed it). Turn that trailing block back into the real tool call.
+export function salvageToolCall(msg: Message): Message {
+  if (msg.tool_calls?.length) return msg;
+  const m = /```(?:json)?\s*\n(\{[\s\S]*\})\s*\n```\s*$/.exec(msg.content);
+  if (!m) return msg;
+  let args: Record<string, unknown>;
+  try {
+    args = JSON.parse(m[1]);
+  } catch {
+    return msg;
+  }
+  if (typeof args.question !== "string" || !args.options) return msg;
+  const name = "correctAnswer" in args ? "quiz" : "ask_user_question";
+  return { ...msg, content: msg.content.slice(0, m.index).trimEnd(), tool_calls: [{ function: { name, arguments: args } }] };
 }

@@ -1,63 +1,86 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import { SquarePen, Settings as SettingsIcon, Trash2 } from "lucide-react";
-import type { ToolCall } from "ollama/browser";
+import type { ModelRef, ToolCall } from "./llm";
 import Chat from "./components/Chat";
 import Settings from "./components/Settings";
-import { DEFAULT_MODEL, addUserMessage, listModels, runAgent, type Live } from "./agent";
+import Sidebar from "./components/Sidebar";
+import { addUserMessage, runAgent, type Live } from "./agent";
+import { DEFAULT_MODEL, getProvider, listAllModels, readModel } from "./providers";
+import type { DepNode } from "./graph";
+import type { Material } from "./material";
 import {
+  addMaterial,
+  addQuizHint,
   addMessage,
   createSession,
   deleteSession,
+  getAttachments,
   getMessages,
-  getSetting,
+  listFolders,
   listSessions,
+  setDone,
   setSetting,
+  type Attachment,
   type ChatMessage,
+  type Folder,
   type Session,
 } from "./db";
 import "./App.css";
 
 type Run = { controller: AbortController; live: Live | null };
 
-function friendlyError(e: unknown): string {
-  const msg = e instanceof Error ? e.message : String(e);
-  if (/401|unauthorized/i.test(msg)) return "Ollama rejected the API key. Check it in Settings.";
-  if (/does not support tools/i.test(msg)) return "This model can't use tools (quizzes, research). Pick another model.";
-  return msg;
+const SIDEBAR_KEY = "dusty.sidebarHidden";
+
+function loadSidebarOpen(): boolean {
+  try {
+    return localStorage.getItem(SIDEBAR_KEY) !== "1";
+  } catch {
+    return true;
+  }
 }
 
-function relativeTime(ms: number): string {
-  const mins = Math.round((Date.now() - ms) / 60000);
-  if (mins < 1) return "now";
-  if (mins < 60) return `${mins}m`;
-  const hours = Math.round(mins / 60);
-  if (hours < 24) return `${hours}h`;
-  const days = Math.round(hours / 24);
-  return days < 7 ? `${days}d` : `${Math.round(days / 7)}w`;
+function friendlyError(e: unknown): string {
+  const msg = e instanceof Error ? e.message : String(e);
+  if (msg.startsWith("Codex:")) return msg;
+  if (/401|unauthorized/i.test(msg)) return "Ollama rejected the API key. Check it in Settings.";
+  if (/does not support tools/i.test(msg)) return "This model can't use tools (quizzes, research). Pick another model.";
+  if (/Claude Code isn't installed/.test(msg)) return "Claude Code isn't installed. Get it at claude.com/claude-code, then restart Dusty.";
+  if (/not logged in|run \/login/i.test(msg)) return "Claude Code isn't logged in. Run claude once in a terminal to sign in.";
+  return msg;
 }
 
 export default function App() {
   const [sessions, setSessions] = useState<Session[]>([]);
+  const [folders, setFolders] = useState<Folder[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
+  // What "send" creates while no session is open.
+  const [draftKind, setDraftKind] = useState<Session["kind"]>("lesson");
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [runs, setRuns] = useState<Record<string, Run>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [models, setModels] = useState<string[]>([]);
-  const [model, setModel] = useState(DEFAULT_MODEL);
-  const [hasKey, setHasKey] = useState(true);
+  const [models, setModels] = useState<ModelRef[]>([]);
+  const [model, setModel] = useState<ModelRef>(DEFAULT_MODEL);
+  const [setupHint, setSetupHint] = useState<string | null>(null);
+  const [sidebarOpen, setSidebarOpen] = useState(loadSidebarOpen);
   const activeRef = useRef(activeId);
 
-  const refreshSessions = useCallback(() => listSessions().then(setSessions), []);
+  const refreshSessions = useCallback(async () => {
+    const [s, f] = await Promise.all([listSessions(), listFolders()]);
+    setSessions(s);
+    setFolders(f);
+  }, []);
   const reloadMessages = useCallback(async (sid: string) => {
-    const m = await getMessages(sid);
-    if (activeRef.current === sid) setMessages(m);
+    const [m, a] = await Promise.all([getMessages(sid), getAttachments(sid)]);
+    if (activeRef.current !== sid) return;
+    setMessages(m);
+    setAttachments(a);
   }, []);
   const loadConfig = useCallback(async () => {
-    setModel(await getSetting("model", DEFAULT_MODEL));
-    setHasKey(!!(await invoke<string | null>("get_api_key")));
-    listModels().then(setModels, () => setModels([]));
+    const m = await readModel();
+    setModel(m);
+    getProvider(m.provider).setupHint().then(setSetupHint, () => setSetupHint(null));
+    listAllModels().then(setModels);
   }, []);
 
   useEffect(() => {
@@ -65,9 +88,11 @@ export default function App() {
     loadConfig();
   }, [refreshSessions, loadConfig]);
 
-  function select(sid: string | null) {
+  function select(sid: string | null, kind: Session["kind"] = "lesson") {
     activeRef.current = sid;
     setActiveId(sid);
+    setDraftKind(kind);
+    setAttachments([]);
     if (sid) reloadMessages(sid);
     else setMessages([]);
   }
@@ -96,14 +121,17 @@ export default function App() {
       });
   }
 
-  async function send(text: string) {
+  async function send(text: string, material: Material[]) {
     let sid = activeId;
     if (!sid) {
-      // ponytail: title is the first message; ask the model for a title if these read badly
-      sid = (await createSession(text.length > 60 ? `${text.slice(0, 57)}...` : text)).id;
-      select(sid);
+      // A placeholder until the first reply, when the session gets an AI title.
+      const title = text || material[0].name;
+      sid = (await createSession(title.length > 60 ? `${title.slice(0, 57)}...` : title, { kind: draftKind })).id;
+      select(sid, draftKind);
+      if (draftKind === "exam") text ||= "Here's what my exam covers.";
     }
-    await addUserMessage(sid, text);
+    const id = await addUserMessage(sid, text || "Here are my files.");
+    for (const m of material) await addMaterial(sid, id, m);
     await reloadMessages(sid);
     refreshSessions();
     start(sid);
@@ -116,6 +144,27 @@ export default function App() {
     start(sid);
   }
 
+  /** Opens the exam lesson for a map node, creating and starting it the first time. */
+  async function study(exam: Session, node: DepNode) {
+    let child = sessions.find((s) => s.parent_id === exam.id && s.node_id === node.id);
+    child ??= await createSession(node.label, { parent_id: exam.id, node_id: node.id });
+    select(child.id);
+    // A lesson marked done before it was ever opened has no messages yet.
+    if ((await getMessages(child.id)).length === 0) {
+      await addUserMessage(child.id, `Teach me ${node.label} for ${exam.title}.`);
+      await reloadMessages(child.id);
+      start(child.id);
+    }
+    refreshSessions();
+  }
+
+  async function toggleDone(exam: Session, node: DepNode) {
+    const child = sessions.find((s) => s.parent_id === exam.id && s.node_id === node.id);
+    if (child) await setDone(child.id, !child.done);
+    else await setDone((await createSession(node.label, { parent_id: exam.id, node_id: node.id })).id, true);
+    refreshSessions();
+  }
+
   async function remove(sid: string) {
     runs[sid]?.controller.abort();
     await deleteSession(sid);
@@ -123,62 +172,64 @@ export default function App() {
     refreshSessions();
   }
 
+  function showSidebar(open: boolean) {
+    setSidebarOpen(open);
+    try {
+      localStorage.setItem(SIDEBAR_KEY, open ? "0" : "1");
+    } catch {
+      // Remembering it is a convenience; losing it is fine.
+    }
+  }
+
   const run = activeId ? runs[activeId] : undefined;
+  const session = sessions.find((s) => s.id === activeId);
 
   return (
     <div className="app">
-      <aside className="sidebar">
-        <div className="sidebar-top" data-tauri-drag-region />
-        <button className="nav-item" onClick={() => select(null)}>
-          <SquarePen size={16} /> New lesson
-        </button>
-        {sessions.length > 0 && <div className="sidebar-label">Lessons</div>}
-        <nav className="session-list">
-          {sessions.map((s) => (
-            <div
-              key={s.id}
-              role="button"
-              tabIndex={0}
-              className={`session ${s.id === activeId ? "active" : ""}`}
-              onClick={() => select(s.id)}
-              onKeyDown={(e) => e.key === "Enter" && select(s.id)}
-            >
-              <span className="session-title">{s.title}</span>
-              {runs[s.id] ? <span className="dot-pulse small" /> : <span className="session-time">{relativeTime(s.updated_at)}</span>}
-              <button
-                className="icon-btn session-delete"
-                aria-label="Delete lesson"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  remove(s.id);
-                }}
-              >
-                <Trash2 size={14} />
-              </button>
-            </div>
-          ))}
-        </nav>
-        <button className="nav-item" onClick={() => setSettingsOpen(true)}>
-          <SettingsIcon size={16} /> Settings
-        </button>
-      </aside>
+      <Sidebar
+        sessions={sessions}
+        folders={folders}
+        activeId={activeId}
+        running={(sid) => !!runs[sid]}
+        onSelect={select}
+        onNew={(kind) => select(null, kind)}
+        onDelete={remove}
+        onChange={refreshSessions}
+        onOpenSettings={() => setSettingsOpen(true)}
+        open={sidebarOpen}
+        onClose={() => showSidebar(false)}
+      />
       <Chat
-        key={activeId ?? "new"}
-        title={sessions.find((s) => s.id === activeId)?.title}
+        key={activeId ?? `new-${draftKind}`}
+        session={session}
+        draftKind={draftKind}
+        exam={sessions.find((s) => s.id === session?.parent_id)}
+        lessons={sessions.filter((s) => s.parent_id === activeId)}
+        attachments={attachments}
         messages={messages}
         live={run?.live ?? null}
         running={!!run}
         error={activeId ? errors[activeId] : undefined}
-        hasKey={hasKey}
+        setupHint={setupHint}
         models={models}
         model={model}
-        onModelChange={(m) => {
+        onModelChange={async (m) => {
           setModel(m);
-          setSetting("model", m);
+          await setSetting("model", m);
+          loadConfig();
         }}
         onSend={send}
+        onStudy={(node) => session && study(session, node)}
+        onToggleDone={(node) => session && toggleDone(session, node)}
+        onOpen={select}
+        onShowSidebar={sidebarOpen ? undefined : () => showSidebar(true)}
         onStop={() => run?.controller.abort()}
         onAnswer={answer}
+        onHint={async (messageId, callIndex, hint) => {
+          const sid = activeId!;
+          await addQuizHint(messageId, callIndex, hint);
+          await reloadMessages(sid);
+        }}
         onRetry={() => activeId && start(activeId)}
         onOpenSettings={() => setSettingsOpen(true)}
       />

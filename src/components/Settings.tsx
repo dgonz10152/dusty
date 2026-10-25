@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { X } from "lucide-react";
 import { getSetting, setSetting } from "../db";
-import { DEFAULT_HOST } from "../agent";
+import { DEFAULT_HOST } from "../providers/ollama";
 import { EMPTY_PROFILE, type Profile } from "../prompts";
 
 const PROFILE_FIELDS: { key: keyof Profile; label: string; placeholder: string; multiline?: boolean }[] = [
