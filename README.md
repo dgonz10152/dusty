@@ -32,7 +32,7 @@ Two principles drive it: start from truths you can accept without caveats, and m
 ## Stack
 
 - [Tauri 2](https://tauri.app) with React 19, TypeScript, and Vite
-- Pluggable model providers (`src/providers/`): [Ollama](https://ollama.com) and [Claude Code](https://claude.com/claude-code)
+- Pluggable model providers (`src/providers/`): [Ollama](https://ollama.com), [Claude Code](https://claude.com/claude-code), and [Codex](https://developers.openai.com/codex/cli/)
 - `tauri-plugin-sql` (SQLite), `tauri-plugin-http`, and `keyring`
 
 ## Getting started
@@ -51,6 +51,14 @@ Then open **Settings** and fill in **About me**, and pick a model from the picke
 Install [Claude Code](https://claude.com/claude-code) and run `claude` once in a terminal to sign in.
 Dusty finds it on its own and lists Opus, Sonnet, and Haiku in the picker, using your Claude plan.
 Each turn runs headless `claude -p` with no tools, and research uses its built-in web search.
+
+### Codex models
+
+Install [Codex CLI](https://developers.openai.com/codex/cli/) and run `codex login` in a terminal.
+Restart Dusty, then select **Codex · default** in the study model picker.
+Dusty uses Codex's configured model and saved sign-in, subject to your account's access and usage limits.
+Teaching, quizzes, hints, titles, research, and image transcription run through ephemeral, read-only CLI turns; research enables live web search.
+If Dusty asks you to update Codex, install a current CLI version and try again.
 
 ### Ollama models
 

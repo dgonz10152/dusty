@@ -1,8 +1,10 @@
+mod codex;
+use codex::{CodexRuns, codex_available, codex_models, codex_run, codex_stop};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::{Mutex, OnceLock};
-use tauri::{ipc::Channel, Manager, State};
+use tauri::{Manager, State, ipc::Channel};
 use tauri_plugin_sql::{Migration, MigrationKind};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
@@ -101,7 +103,11 @@ async fn claude_run(
     };
     let bin = claude_path().ok_or("Claude Code isn't installed")?;
     // An empty working dir keeps any CLAUDE.md out of the conversation.
-    let cwd = app.path().app_data_dir().map_err(|e| e.to_string())?.join("claude");
+    let cwd = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("claude");
     std::fs::create_dir_all(&cwd).map_err(|e| e.to_string())?;
 
     let mut cmd = Command::new(bin);
@@ -268,12 +274,17 @@ pub fn run() {
                 .build(),
         )
         .manage(ClaudeRuns::default())
+        .manage(CodexRuns::default())
         .invoke_handler(tauri::generate_handler![
             get_api_key,
             set_api_key,
             claude_available,
             claude_run,
-            claude_stop
+            claude_stop,
+            codex_available,
+            codex_models,
+            codex_run,
+            codex_stop
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

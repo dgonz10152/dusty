@@ -1,7 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { Message } from "../llm.ts";
-import { applyEvent, parseToolBlock, streamingView, toTranscript } from "./claudeCode.ts";
+import { applyEvent } from "./claudeCode.ts";
+import { parseToolBlock, streamingView, toTranscript } from "./toolProtocol.ts";
 
 const quiz = { name: "quiz", arguments: { question: "2+2?", options: [{ label: "4", value: "4" }], correctAnswer: "4", explanation: "Sum." } };
 const reply = (content: string): Message => ({ role: "assistant", content });

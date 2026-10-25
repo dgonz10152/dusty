@@ -29,6 +29,7 @@ type Run = { controller: AbortController; live: Live | null };
 
 function friendlyError(e: unknown): string {
   const msg = e instanceof Error ? e.message : String(e);
+  if (msg.startsWith("Codex:")) return msg;
   if (/401|unauthorized/i.test(msg)) return "Ollama rejected the API key. Check it in Settings.";
   if (/does not support tools/i.test(msg)) return "This model can't use tools (quizzes, research). Pick another model.";
   if (/Claude Code isn't installed/.test(msg)) return "Claude Code isn't installed. Get it at claude.com/claude-code, then restart Dusty.";

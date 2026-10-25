@@ -1,9 +1,10 @@
 import { getSetting } from "../db";
 import type { ModelRef, Provider } from "../llm";
 import { claudeCode } from "./claudeCode";
+import { codex } from "./codex";
 import { ollama } from "./ollama";
 
-export const PROVIDERS: Provider[] = [ollama, claudeCode];
+export const PROVIDERS: Provider[] = [ollama, claudeCode, codex];
 
 export const DEFAULT_MODEL: ModelRef = { provider: "ollama", model: "gpt-oss:120b" };
 
