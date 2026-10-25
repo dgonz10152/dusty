@@ -116,11 +116,33 @@ button:disabled {
   border-right: 1px solid var(--border);
   user-select: none;
   -webkit-user-select: none;
+  transition: margin-left 0.2s ease;
 }
 
+.sidebar.closed {
+  margin-left: -261px;
+}
+
+/* Centered on the macOS traffic lights, which sit 16px from the top. */
 .sidebar-top {
   height: 44px;
   flex-shrink: 0;
+  display: flex;
+  justify-content: flex-end;
+  align-items: flex-start;
+  /* Right edge lines up with the "Lessons" row's new-folder button. */
+  padding: 4px 6px 0 0;
+}
+
+.sidebar-toggle {
+  flex-shrink: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar,
+  .main-header {
+    transition: none;
+  }
 }
 
 .nav-item {
@@ -364,6 +386,17 @@ button:disabled {
   display: flex;
   align-items: center;
   padding: 0 20px;
+  transition: padding-left 0.2s ease;
+}
+
+/* Clears the traffic lights. */
+.main-header.sidebar-hidden {
+  padding-left: 78px;
+}
+
+.main-header .sidebar-toggle {
+  align-self: flex-start;
+  margin: 4px 12px 0 0;
 }
 
 .crumb {

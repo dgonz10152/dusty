@@ -27,6 +27,16 @@ import "./App.css";
 
 type Run = { controller: AbortController; live: Live | null };
 
+const SIDEBAR_KEY = "dusty.sidebarHidden";
+
+function loadSidebarOpen(): boolean {
+  try {
+    return localStorage.getItem(SIDEBAR_KEY) !== "1";
+  } catch {
+    return true;
+  }
+}
+
 function friendlyError(e: unknown): string {
   const msg = e instanceof Error ? e.message : String(e);
   if (msg.startsWith("Codex:")) return msg;
@@ -51,6 +61,7 @@ export default function App() {
   const [models, setModels] = useState<ModelRef[]>([]);
   const [model, setModel] = useState<ModelRef>(DEFAULT_MODEL);
   const [setupHint, setSetupHint] = useState<string | null>(null);
+  const [sidebarOpen, setSidebarOpen] = useState(loadSidebarOpen);
   const activeRef = useRef(activeId);
 
   const refreshSessions = useCallback(async () => {
@@ -160,6 +171,15 @@ export default function App() {
     refreshSessions();
   }
 
+  function showSidebar(open: boolean) {
+    setSidebarOpen(open);
+    try {
+      localStorage.setItem(SIDEBAR_KEY, open ? "0" : "1");
+    } catch {
+      // Remembering it is a convenience; losing it is fine.
+    }
+  }
+
   const run = activeId ? runs[activeId] : undefined;
   const session = sessions.find((s) => s.id === activeId);
 
@@ -175,6 +195,8 @@ export default function App() {
         onDelete={remove}
         onChange={refreshSessions}
         onOpenSettings={() => setSettingsOpen(true)}
+        open={sidebarOpen}
+        onClose={() => showSidebar(false)}
       />
       <Chat
         key={activeId ?? `new-${draftKind}`}
@@ -199,6 +221,7 @@ export default function App() {
         onStudy={(node) => session && study(session, node)}
         onToggleDone={(node) => session && toggleDone(session, node)}
         onOpen={select}
+        onShowSidebar={sidebarOpen ? undefined : () => showSidebar(true)}
         onStop={() => run?.controller.abort()}
         onAnswer={answer}
         onRetry={() => activeId && start(activeId)}

@@ -1,5 +1,19 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ArrowUp, BookmarkPlus, ChevronDown, ChevronRight, CircleCheck, FileText, Globe, GraduationCap, ImageIcon, Paperclip, Square, X } from "lucide-react";
+import {
+  ArrowUp,
+  BookmarkPlus,
+  ChevronDown,
+  ChevronRight,
+  CircleCheck,
+  FileText,
+  Globe,
+  GraduationCap,
+  ImageIcon,
+  PanelLeftOpen,
+  Paperclip,
+  Square,
+  X,
+} from "lucide-react";
 import type { ModelRef, ToolCall } from "../llm";
 import Markdown, { ExamMapContext, InlineMath, type ExamMap } from "./Markdown";
 import { QuestionCard, QuizCard } from "./Cards";
@@ -34,6 +48,8 @@ type Props = {
   onStudy: (node: DepNode) => void;
   onToggleDone: (node: DepNode) => void;
   onOpen: (sid: string) => void;
+  /** Set while the sidebar is hidden. */
+  onShowSidebar?: () => void;
 };
 
 function Thinking({ text, active }: { text: string; active?: boolean }) {
@@ -420,7 +436,12 @@ export default function Chat(props: Props) {
           e.currentTarget.value = "";
         }}
       />
-      <header className="main-header" data-tauri-drag-region>
+      <header className={`main-header ${props.onShowSidebar ? "sidebar-hidden" : ""}`} data-tauri-drag-region>
+        {props.onShowSidebar && (
+          <button className="icon-btn sidebar-toggle" aria-label="Show sidebar" title="Show sidebar" onClick={props.onShowSidebar}>
+            <PanelLeftOpen size={16} />
+          </button>
+        )}
         {exam && (
           <>
             <button className="crumb" onClick={() => props.onOpen(exam.id)}>

@@ -7,6 +7,7 @@ import {
   Folder as FolderIcon,
   FolderPlus,
   GraduationCap,
+  PanelLeftClose,
   Search,
   Settings as SettingsIcon,
   SquarePen,
@@ -47,9 +48,11 @@ type Props = {
   onDelete: (sid: string) => void;
   onChange: () => void;
   onOpenSettings: () => void;
+  open: boolean;
+  onClose: () => void;
 };
 
-export default function Sidebar({ sessions, folders, activeId, running, onSelect, onNew, onDelete, onChange, onOpenSettings }: Props) {
+export default function Sidebar({ sessions, folders, activeId, running, onSelect, onNew, onDelete, onChange, onOpenSettings, open, onClose }: Props) {
   const [collapsed, setCollapsed] = useState(loadCollapsed);
   const [editing, setEditing] = useState<string | null>(null);
   // The folder id a lesson is being dragged over; "" is the top level.
@@ -257,8 +260,12 @@ export default function Sidebar({ sessions, folders, activeId, running, onSelect
   const loose = top.filter((s) => !s.folder_id || !folders.some((f) => f.id === s.folder_id));
 
   return (
-    <aside className="sidebar">
-      <div className="sidebar-top" data-tauri-drag-region />
+    <aside className={`sidebar ${open ? "" : "closed"}`} inert={!open}>
+      <div className="sidebar-top" data-tauri-drag-region>
+        <button className="icon-btn sidebar-toggle" aria-label="Hide sidebar" title="Hide sidebar" onClick={onClose}>
+          <PanelLeftClose size={16} />
+        </button>
+      </div>
       <button className="nav-item" onClick={() => onNew("lesson")}>
         <SquarePen size={16} /> New lesson
       </button>
