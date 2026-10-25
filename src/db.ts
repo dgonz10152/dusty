@@ -1,5 +1,6 @@
 import Database from "@tauri-apps/plugin-sql";
 import type { Message } from "./llm";
+import type { Hint } from "./quiz";
 import type { Material } from "./material";
 
 export type Session = {
@@ -154,6 +155,15 @@ export async function getMessages(sessionId: string): Promise<ChatMessage[]> {
     ...(r.tool_calls && { tool_calls: JSON.parse(r.tool_calls) }),
     ...(r.tool_name && { tool_name: r.tool_name }),
   }));
+}
+
+/** Append atomically so hints finishing in another session don't overwrite each other. */
+export async function addQuizHint(messageId: number, callIndex: number, hint: Hint) {
+  const path = `$[${callIndex}].hints`;
+  await (await db()).execute(
+    "UPDATE messages SET tool_calls = json_insert(json_insert(tool_calls, $1, json('[]')), $2, json($3)) WHERE id = $4",
+    [path, `${path}[#]`, JSON.stringify(hint), messageId],
+  );
 }
 
 /** Returns the new message's id. */

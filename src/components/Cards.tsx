@@ -80,7 +80,7 @@ function OptionRow({
 }
 
 /** `fromBasics` offers "Teach me from the basics", for while the tutor is still probing the student's level. */
-export function QuizCard({ args: raw, result, onAnswer, fromBasics }: CardProps & { fromBasics?: boolean }) {
+export function QuizCard({ args: raw, result, onAnswer, fromBasics, hints = [], onHint }: CardProps & { fromBasics?: boolean; hints?: Hint[]; onHint: (hint: Hint) => Promise<void> }) {
   const args = useMemo(() => parseQuizArgs(raw), [raw]);
   const options = useMemo(
     () => (args.shuffle ? shuffled(args.options, args.question) : args.options),
@@ -89,7 +89,6 @@ export function QuizCard({ args: raw, result, onAnswer, fromBasics }: CardProps 
   const answer = parse<QuizResult>(result);
   const [selected, toggle] = useSelection(args.multiSelect);
   const [note, setNote] = useState("");
-  const [hints, setHints] = useState<Hint[]>([]);
   // null while the "Ask a question" box is closed.
   const [draft, setDraft] = useState<string | null>(null);
   const [hintState, setHintState] = useState<"idle" | "waiting" | "failed">("idle");
@@ -103,7 +102,7 @@ export function QuizCard({ args: raw, result, onAnswer, fromBasics }: CardProps 
     setHintState("waiting");
     try {
       const answer = await askHint(args, question);
-      setHints((h) => [...h, { question, answer }]);
+      await onHint({ question, answer });
       setDraft(null);
       setHintState("idle");
     } catch {

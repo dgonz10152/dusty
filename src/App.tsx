@@ -9,6 +9,7 @@ import type { DepNode } from "./graph";
 import type { Material } from "./material";
 import {
   addMaterial,
+  addQuizHint,
   addMessage,
   createSession,
   deleteSession,
@@ -224,6 +225,11 @@ export default function App() {
         onShowSidebar={sidebarOpen ? undefined : () => showSidebar(true)}
         onStop={() => run?.controller.abort()}
         onAnswer={answer}
+        onHint={async (messageId, callIndex, hint) => {
+          const sid = activeId!;
+          await addQuizHint(messageId, callIndex, hint);
+          await reloadMessages(sid);
+        }}
         onRetry={() => activeId && start(activeId)}
         onOpenSettings={() => setSettingsOpen(true)}
       />

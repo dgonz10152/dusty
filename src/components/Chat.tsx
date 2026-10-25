@@ -14,6 +14,7 @@ import {
   Square,
   X,
 } from "lucide-react";
+import type { Hint } from "../quiz";
 import type { ModelRef, ToolCall } from "../llm";
 import Markdown, { ExamMapContext, InlineMath, type ExamMap } from "./Markdown";
 import { QuestionCard, QuizCard } from "./Cards";
@@ -43,6 +44,7 @@ type Props = {
   onSend: (text: string, material: Material[]) => void;
   onStop: () => void;
   onAnswer: (call: ToolCall, content: string) => void;
+  onHint: (messageId: number, callIndex: number, hint: Hint) => Promise<void>;
   onRetry: () => void;
   onOpenSettings: () => void;
   onStudy: (node: DepNode) => void;
@@ -74,8 +76,10 @@ function ToolView({
   result,
   onAnswer,
   probing,
+  onHint,
 }: {
   call: ToolCall;
+  onHint: (hint: Hint) => Promise<void>;
   result?: string;
   onAnswer?: (content: string) => void;
   /** Still finding the student's level: no plan yet. */
@@ -86,7 +90,7 @@ function ToolView({
     return <div className="tool-chip muted">Skipped: {String(args.question ?? call.function.name)}</div>;
   }
   const answer = onAnswer ?? (() => {});
-  if (call.function.name === "quiz") return <QuizCard args={args} result={result} onAnswer={answer} fromBasics={probing && !!onAnswer} />;
+  if (call.function.name === "quiz") return <QuizCard args={args} result={result} onAnswer={answer} fromBasics={probing && !!onAnswer} hints={call.hints} onHint={onHint} />;
   if (call.function.name === "ask_user_question") return <QuestionCard args={args} result={result} onAnswer={answer} />;
   if (call.function.name === "research") {
     return (
@@ -400,6 +404,7 @@ export default function Chat(props: Props) {
             call={call}
             result={results[k]?.content}
             onAnswer={waitingOnStudent && call === pending ? (content) => onAnswer(call, content) : undefined}
+            onHint={(hint) => props.onHint(m.id, k, hint)}
             probing={probing}
           />
         ))}

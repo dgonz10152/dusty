@@ -1,6 +1,8 @@
+import type { Hint } from "./quiz";
+
 // Provider-neutral chat types. These are the shapes stored in SQLite, so keep them stable.
 
-export type ToolCall = { function: { name: string; arguments: Record<string, any> } };
+export type ToolCall = { hints?: Hint[]; function: { name: string; arguments: Record<string, any> } };
 
 export type Message = {
   role: "system" | "user" | "assistant" | "tool";
