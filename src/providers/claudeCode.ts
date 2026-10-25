@@ -46,12 +46,16 @@ async function run(
       gotResult();
     } else onEvent?.(ev);
   });
-  const stop = () => invoke("claude_stop", { runId });
+  const stop = () => {
+    gotResult();
+    return invoke("claude_stop", { runId });
+  };
   signal.addEventListener("abort", stop);
   try {
     await invoke("claude_run", { runId, kind, model, system, input, onEvent: onEventChannel });
     // Channel messages can land after the command returns, and a successful run always ends with a result.
     await resultArrived;
+    signal.throwIfAborted();
   } catch (e) {
     if (signal.aborted) throw new DOMException("Aborted", "AbortError");
     throw new Error(result?.is_error && result.result ? result.result : String(e));

@@ -101,88 +101,88 @@ async fn claude_run(
         "transcribe" => ("", "stream-json"),
         _ => return Err(format!("Unknown run kind: {kind}")),
     };
-    let bin = claude_path().ok_or("Claude Code isn't installed")?;
-    // An empty working dir keeps any CLAUDE.md out of the conversation.
-    let cwd = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| e.to_string())?
-        .join("claude");
-    std::fs::create_dir_all(&cwd).map_err(|e| e.to_string())?;
-
-    let mut cmd = Command::new(bin);
-    cmd.args([
-        "-p",
-        "--output-format",
-        "stream-json",
-        "--verbose",
-        "--include-partial-messages",
-        "--input-format",
-        input_format,
-        // Thinking text is omitted in print mode unless asked for; summaries are what the API offers.
-        "--thinking-display",
-        "summarized",
-        "--no-session-persistence",
-        "--strict-mcp-config",
-        "--setting-sources",
-        "",
-        "--model",
-        &model,
-        "--system-prompt",
-        &system,
-        "--tools",
-        tools,
-    ]);
-    if !tools.is_empty() {
-        cmd.args(["--allowedTools", tools]);
-    }
-    let mut child = cmd
-        .current_dir(cwd)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true)
-        .spawn()
-        .map_err(|e| format!("Couldn't start Claude Code: {e}"))?;
-
-    let mut stdin = child.stdin.take().unwrap();
-    tokio::spawn(async move {
-        let _ = stdin.write_all(input.as_bytes()).await;
-    });
-    let mut stderr = child.stderr.take().unwrap();
-    let stderr = tokio::spawn(async move {
-        let mut s = String::new();
-        let _ = stderr.read_to_string(&mut s).await;
-        s
-    });
-    let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
-
     let (cancel_tx, mut cancel_rx) = oneshot::channel();
     runs.0.lock().unwrap().insert(run_id.clone(), cancel_tx);
-    let streamed = tokio::select! {
+    let result = tokio::select! {
+        biased;
         _ = &mut cancel_rx => Err("Cancelled".to_string()),
-        r = async {
+        result = async {
+            let bin = tauri::async_runtime::spawn_blocking(claude_path)
+                .await
+                .map_err(|e| e.to_string())?
+                .ok_or("Claude Code isn't installed")?;
+            // An empty working dir keeps any CLAUDE.md out of the conversation.
+            let cwd = app
+                .path()
+                .app_data_dir()
+                .map_err(|e| e.to_string())?
+                .join("claude");
+            std::fs::create_dir_all(&cwd).map_err(|e| e.to_string())?;
+
+            let mut cmd = Command::new(bin);
+            cmd.args([
+                "-p",
+                "--output-format",
+                "stream-json",
+                "--verbose",
+                "--include-partial-messages",
+                "--input-format",
+                input_format,
+                // Thinking text is omitted in print mode unless asked for; summaries are what the API offers.
+                "--thinking-display",
+                "summarized",
+                "--no-session-persistence",
+                "--strict-mcp-config",
+                "--setting-sources",
+                "",
+                "--model",
+                &model,
+                "--system-prompt",
+                &system,
+                "--tools",
+                tools,
+            ]);
+            if !tools.is_empty() {
+                cmd.args(["--allowedTools", tools]);
+            }
+            let mut child = cmd
+                .current_dir(cwd)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .kill_on_drop(true)
+                .spawn()
+                .map_err(|e| format!("Couldn't start Claude Code: {e}"))?;
+
+            let mut stdin = child.stdin.take().unwrap();
+            tokio::spawn(async move {
+                let _ = stdin.write_all(input.as_bytes()).await;
+            });
+            let mut stderr = child.stderr.take().unwrap();
+            let stderr = tokio::spawn(async move {
+                let mut s = String::new();
+                let _ = stderr.read_to_string(&mut s).await;
+                s
+            });
+            let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
+
             while let Some(line) = lines.next_line().await.map_err(|e| e.to_string())? {
                 on_event.send(line).map_err(|e| e.to_string())?;
             }
-            Ok(())
-        } => r,
+
+            let status = child.wait().await.map_err(|e| e.to_string())?;
+            if status.success() {
+                return Ok(());
+            }
+            let err = stderr.await.unwrap_or_default();
+            Err(match err.trim() {
+                "" => format!("Claude Code exited with {status}"),
+                e => e.to_string(),
+            })
+        } => result,
     };
     runs.0.lock().unwrap().remove(&run_id);
-    if streamed.is_err() {
-        let _ = child.kill().await;
-        return streamed;
-    }
-
-    let status = child.wait().await.map_err(|e| e.to_string())?;
-    if status.success() {
-        return Ok(());
-    }
-    let err = stderr.await.unwrap_or_default();
-    Err(match err.trim() {
-        "" => format!("Claude Code exited with {status}"),
-        e => e.to_string(),
-    })
+    result
 }
 
 #[tauri::command]

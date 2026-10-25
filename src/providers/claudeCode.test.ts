@@ -46,3 +46,32 @@ test("stream events fold into the message, and a half-written tool block stays h
   assert.deepEqual(streamingView(msg).tool_calls, [{ function: { name: "quiz", arguments: {} } }]);
   assert.equal(streamingView({ ...msg, content: "No tools here." }).content, "No tools here.");
 });
+
+for (const waitingForResult of [false, true]) test(`Stop rejects a successful Claude run ${waitingForResult ? "while waiting for its result" : "after its result arrives"}`, { timeout: 1000 }, async () => {
+  const { mockIPC, clearMocks } = await import("@tauri-apps/api/mocks");
+  const { claudeCode } = await import("./claudeCode.ts");
+  globalThis.window = { crypto: globalThis.crypto } as Window & typeof globalThis;
+  const controller = new AbortController();
+  let stopped = false;
+  mockIPC((cmd, payload) => {
+    if (cmd === "claude_stop") { stopped = true; return; }
+    if (cmd === "claude_run") {
+      if (waitingForResult) setImmediate(() => controller.abort());
+      else {
+        (payload as { onEvent: { onmessage: (line: string) => void } }).onEvent.onmessage(
+          JSON.stringify({ type: "result", result: "Too late" }),
+        );
+        controller.abort();
+      }
+      return;
+    }
+    throw new Error(cmd);
+  });
+  try {
+    await assert.rejects(claudeCode.research({ model: "sonnet", system: "", question: "test", signal: controller.signal }), { name: "AbortError" });
+    assert.equal(stopped, true);
+  } finally {
+    clearMocks();
+    delete globalThis.window;
+  }
+});
