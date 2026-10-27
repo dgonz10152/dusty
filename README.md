@@ -75,6 +75,25 @@ npx tsc --noEmit    # type-check
 npm run tauri build # production bundle
 ```
 
+## Releases
+
+Publishing a GitHub release or prerelease runs the **Release builds** workflow and attaches Windows x64 installers (`.exe` and `.msi`) and separate macOS Apple Silicon (`aarch64`) and Intel (`x64`) `.dmg` downloads to that release.
+Saving a draft does not start builds.
+
+1. Update the version in `package.json`, `src-tauri/tauri.conf.json`, and `src-tauri/Cargo.toml`, and refresh the npm and Cargo lockfiles.
+2. Commit and push those changes, including the release workflow, before creating the release tag.
+3. Create a GitHub release with a matching version tag (for example, `v0.1.0`) pointing to that commit, then publish it.
+4. Follow **Actions > Release builds** for progress, then find downloads under the release's **Assets**.
+
+Each platform uploads as it finishes, so assets may appear at different times.
+If a job fails, inspect its log and use **Re-run failed jobs** on that workflow run; successful platforms are not canceled by another platform's failure.
+The workflow builds the tagged source and uses the versions in the manifests; it does not bump versions automatically.
+No additional secrets are required: uploads use the built-in `GITHUB_TOKEN` with `contents: write` permission.
+
+macOS builds use the existing ad-hoc signature without notarization, and Windows installers are unsigned, so OS security prompts are expected.
+Verify installation on Windows and both Mac architectures before treating a release as tested.
+Claude Code and Codex discovery currently uses Unix paths; producing a Windows installer does not verify those integrations on Windows.
+
 ## Roadmap
 
 - Canvas integration, so lessons can use your course's lecture slides and textbook as a source of truth
