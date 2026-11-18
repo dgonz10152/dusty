@@ -1,11 +1,12 @@
-import { addMessage, getAttachments, getMaterial, getMessages, getSession, getSetting, listSessions, renameSession, setDone, setSetting, type Session } from "./db";
+import { addMessage, getAttachments, getMaterial, getMessages, getSession, getSetting, listSessions, renameSession, setDone, setSetting, updateQuizHint, type ChatMessage, type Session } from "./db";
 import { latestMap } from "./graph";
 import type { Message, Tool, ToolCall } from "./llm";
 import { loadImage, materialMessage, withMaterial, type Material } from "./material";
-import { addCourse, childContext, EMPTY_PROFILE, HINTER, hintPrompt, examPrompt, RESEARCHER, teacherPrompt, TITLER, TRANSCRIBER, type Profile } from "./prompts";
+import { addCourse, childContext, EMPTY_PROFILE, HINTER, examPrompt, RESEARCHER, teacherPrompt, TITLER, TRANSCRIBER, type Profile } from "./prompts";
 import { cleanTitle, titleInput } from "./title";
 import { getProvider, readModel } from "./providers";
-import { salvageToolCall, type QuizArgs } from "./quiz";
+import { canCompleteLesson, salvageToolCall } from "./quiz";
+import { guidanceMessages } from "./guidance";
 
 /** Tools answered by the student through a card in the chat; the loop stops and resumes on answer. */
 export const INTERACTIVE = new Set(["quiz", "ask_user_question"]);
@@ -100,11 +101,55 @@ async function nameSession(session: Session, messages: Message[]) {
   if (title) await renameSession(session.id, title);
 }
 
-/** Answers a student's clarifying question on a quiz without giving the answer away. */
-export async function askHint(args: QuizArgs, question: string): Promise<string> {
-  // The selected model, not the quick one: a wrong hint is worse than a slow one.
-  const { provider, model } = await readModel();
-  return (await getProvider(provider).complete({ model, system: HINTER, prompt: hintPrompt(args, question) })).trim();
+/** Identity includes the persisted message and call index, not the currently open UI. */
+export function pendingQuiz(messages: ChatMessage[]) {
+  const call = pendingCall(messages);
+  if (call?.function.name !== "quiz") return undefined;
+  const message = messages.findLast((m) => m.tool_calls?.includes(call));
+  return message ? { call, messageId: message.id, callIndex: message.tool_calls!.indexOf(call) } : undefined;
+}
+
+export async function runGuidance(
+  sessionId: string,
+  messageId: number,
+  callIndex: number,
+  hintIndex: number,
+  signal: AbortSignal,
+  onLive: (live: Live | null) => void,
+) {
+  const messages = await getMessages(sessionId);
+  const target = pendingQuiz(messages);
+  if (!target || target.messageId !== messageId || target.callIndex !== callIndex) return;
+  const hint = target.call.hints?.[hintIndex];
+  if (!hint) return;
+  let answer = "";
+  try {
+    const { provider, model } = await readModel();
+    const { system, inherited } = await setup(sessionId);
+    const material = await getMaterial(sessionId);
+    signal.throwIfAborted();
+    const context = guidanceMessages(withMaterial(messages, material), target.call, hint.question, hintIndex);
+    const reply = await getProvider(provider).chat({
+      model,
+      system: `${system}\n\n# Current mode: quiz discussion\n${HINTER}`,
+      messages: [...(inherited.length ? [{ role: "user" as const, content: materialMessage(inherited) }] : []), ...context],
+      tools: [],
+      signal,
+      onDelta: (m) => {
+        answer = m.content;
+        onLive({ content: answer, thinking: m.thinking ?? "" });
+      },
+    });
+    signal.throwIfAborted();
+    answer = reply.content.trim();
+    if (!answer) throw new Error("Dusty returned no guidance. Try again.");
+    await updateQuizHint(messageId, callIndex, hintIndex, { question: hint.question, answer });
+  } catch (e) {
+    await updateQuizHint(messageId, callIndex, hintIndex, { question: hint.question, answer, status: signal.aborted ? "stopped" : "failed" });
+    throw e;
+  } finally {
+    onLive(null);
+  }
 }
 
 /** Turns a picture of course material into text with the selected model. */
@@ -169,8 +214,12 @@ export async function runAgent(
             content = `Research failed: ${e instanceof Error ? e.message : String(e)}`;
           }
         } else if (call.function.name === "complete_lesson") {
-          await setDone(sessionId, true);
-          content = "Marked done on the exam map.";
+          if (canCompleteLesson(messages)) {
+            await setDone(sessionId, true);
+            content = "Marked done on the exam map.";
+          } else {
+            content = "Not completed: the latest quiz must be correct and unassisted. Ask a fresh quiz on the same skill with different specifics before marking this lesson done.";
+          }
         } else if (call.function.name === "save_course") {
           const profile = { ...EMPTY_PROFILE, ...(await getSetting<Profile>("profile", EMPTY_PROFILE)) };
           const courses = addCourse(profile.courses, String(call.function.arguments.course ?? ""));

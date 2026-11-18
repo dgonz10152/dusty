@@ -1502,6 +1502,7 @@ div.tool-chip {
 }
 
 .field input,
+.field select,
 .field textarea {
   width: 100%;
   padding: 7px 10px;
@@ -1513,6 +1514,7 @@ div.tool-chip {
 }
 
 .field input:focus,
+.field select:focus,
 .field textarea:focus {
   border-color: var(--border-strong);
 }
@@ -1531,3 +1533,15 @@ div.tool-chip {
   color: var(--red);
   font-size: 13px;
 }
+
+/* Quiz conversations use the same bubbles as the main lesson. */
+.quiz-discussion { margin-top: 18px; }
+.quiz-discussion .msg { margin-bottom: 18px; }
+.guidance-status, .assisted-label { color: var(--text-muted); font-size: 13px; }
+.assisted-label { margin: 8px 0; }
+.update-notice { position: fixed; top: 52px; right: 20px; z-index: 20; display: flex; align-items: center; gap: 8px; padding: 10px 14px; background: var(--bg-sidebar); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 4px 20px #0002; }
+.update-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.update-settings details { margin: 10px 0; }
+.update-settings p { margin: 8px 0; }
+.update-overlay { z-index: 100; }
+.update-overlay progress { display: block; width: 100%; margin: 10px 0; }

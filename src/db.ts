@@ -166,6 +166,13 @@ export async function addQuizHint(messageId: number, callIndex: number, hint: Hi
   );
 }
 
+export async function updateQuizHint(messageId: number, callIndex: number, hintIndex: number, hint: Hint) {
+  await (await db()).execute(
+    "UPDATE messages SET tool_calls = json_set(tool_calls, $1, json($2)) WHERE id = $3",
+    [`$[${callIndex}].hints[${hintIndex}]`, JSON.stringify(hint), messageId],
+  );
+}
+
 /** Returns the new message's id. */
 export async function addMessage(sessionId: string, m: Message): Promise<number> {
   const d = await db();

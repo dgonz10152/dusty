@@ -3,7 +3,8 @@ import type { ModelRef, ToolCall } from "./llm";
 import Chat from "./components/Chat";
 import Settings from "./components/Settings";
 import Sidebar from "./components/Sidebar";
-import { addUserMessage, runAgent, type Live } from "./agent";
+import { UpdateProgress, useUpdates } from "./components/Updates";
+import { addUserMessage, pendingQuiz, runAgent, runGuidance, type Live } from "./agent";
 import { DEFAULT_MODEL, getProvider, listAllModels, readModel } from "./providers";
 import type { DepNode } from "./graph";
 import type { Material } from "./material";
@@ -19,6 +20,7 @@ import {
   listSessions,
   setDone,
   setSetting,
+  updateQuizHint,
   type Attachment,
   type ChatMessage,
   type Folder,
@@ -63,7 +65,22 @@ export default function App() {
   const [model, setModel] = useState<ModelRef>(DEFAULT_MODEL);
   const [setupHint, setSetupHint] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(loadSidebarOpen);
+  const update = useUpdates();
+  const [dismissedUpdate, setDismissedUpdate] = useState("");
+  const [dirtySources, setDirtySources] = useState<Set<string>>(new Set());
+  const dirtyChanged = useCallback((source: string, dirty: boolean) => {
+    setDirtySources((previous) => {
+      if (previous.has(source) === dirty) return previous;
+      const next = new Set(previous);
+      if (dirty) next.add(source);
+      else next.delete(source);
+      return next;
+    });
+  }, []);
+  const updateBlocked = Object.keys(runs).length > 0 || dirtySources.size > 0;
+  const updating = update.state.phase === "downloading" || update.state.phase === "installing";
   const activeRef = useRef(activeId);
+  const controllers = useRef(new Map<string, AbortController>());
 
   const refreshSessions = useCallback(async () => {
     const [s, f] = await Promise.all([listSessions(), listFolders()]);
@@ -89,59 +106,109 @@ export default function App() {
   }, [refreshSessions, loadConfig]);
 
   function select(sid: string | null, kind: Session["kind"] = "lesson") {
+    // Clear only on a real switch, so another session's cards never show; reselecting keeps drafts.
+    if (sid !== activeRef.current) setMessages([]);
     activeRef.current = sid;
     setActiveId(sid);
     setDraftKind(kind);
     setAttachments([]);
     if (sid) reloadMessages(sid);
-    else setMessages([]);
   }
 
   function setError(sid: string, error?: string) {
     setErrors(({ [sid]: _, ...rest }) => (error ? { ...rest, [sid]: error } : rest));
   }
 
-  function start(sid: string) {
+  function liveFor(sid: string, live: Live | null) {
+    setRuns((r) => (r[sid] ? { ...r, [sid]: { ...r[sid], live } } : r));
+  }
+
+  function launch(sid: string, task: (signal: AbortSignal) => Promise<void>) {
+    if (controllers.current.has(sid)) return;
     const controller = new AbortController();
+    controllers.current.set(sid, controller);
     setRuns((r) => ({ ...r, [sid]: { controller, live: null } }));
     setError(sid);
-    runAgent(
-      sid,
-      controller.signal,
-      (live) => setRuns((r) => (r[sid] ? { ...r, [sid]: { ...r[sid], live } } : r)),
-      async () => {
-        await reloadMessages(sid);
-        refreshSessions();
-      },
-    )
+    void Promise.resolve().then(() => task(controller.signal))
       .catch((e) => controller.signal.aborted || setError(sid, friendlyError(e)))
-      .finally(() => {
+      .finally(async () => {
+        await reloadMessages(sid);
+        controllers.current.delete(sid);
         setRuns(({ [sid]: _, ...rest }) => rest);
-        reloadMessages(sid);
+        refreshSessions();
       });
+  }
+
+  async function teach(sid: string, signal: AbortSignal) {
+    await runAgent(sid, signal, (live) => liveFor(sid, live), async () => {
+      await reloadMessages(sid);
+      refreshSessions();
+    });
+  }
+
+  async function guide(sid: string, signal: AbortSignal, question?: string) {
+    const target = pendingQuiz(await getMessages(sid));
+    if (!target) return;
+    const { messageId, callIndex, call } = target;
+    let hintIndex = (call.hints?.length ?? 0) - 1;
+    if (question) {
+      hintIndex++;
+      await addQuizHint(messageId, callIndex, { question, answer: "", status: "pending" });
+    } else {
+      const hint = call.hints?.[hintIndex];
+      if (!hint?.status) return;
+      await updateQuizHint(messageId, callIndex, hintIndex, { question: hint.question, answer: "", status: "pending" });
+    }
+    await reloadMessages(sid);
+    await runGuidance(sid, messageId, callIndex, hintIndex, signal, (live) => liveFor(sid, live));
+  }
+
+  function start(sid: string) {
+    launch(sid, async (signal) => {
+      if (pendingQuiz(await getMessages(sid))) await guide(sid, signal);
+      else await teach(sid, signal);
+    });
   }
 
   async function send(text: string, material: Material[]) {
     let sid = activeId;
     if (!sid) {
-      // A placeholder until the first reply, when the session gets an AI title.
       const title = text || material[0].name;
       sid = (await createSession(title.length > 60 ? `${title.slice(0, 57)}...` : title, { kind: draftKind })).id;
       select(sid, draftKind);
       if (draftKind === "exam") text ||= "Here's what my exam covers.";
     }
-    const id = await addUserMessage(sid, text || "Here are my files.");
-    for (const m of material) await addMaterial(sid, id, m);
-    await reloadMessages(sid);
-    refreshSessions();
-    start(sid);
+    const id = sid;
+    launch(id, async (signal) => {
+      if (pendingQuiz(await getMessages(id))) {
+        await guide(id, signal, text);
+        return;
+      }
+      const messageId = await addUserMessage(id, text || "Here are my files.");
+      for (const m of material) await addMaterial(id, messageId, m);
+      await reloadMessages(id);
+      await teach(id, signal);
+    });
   }
 
-  async function answer(call: ToolCall, content: string) {
+  function answer(call: ToolCall, content: string) {
     const sid = activeId!;
-    await addMessage(sid, { role: "tool", tool_name: call.function.name, content });
-    await reloadMessages(sid);
-    start(sid);
+    launch(sid, async (signal) => {
+      const current = pendingQuiz(await getMessages(sid));
+      if (call.function.name === "quiz" && !current) return;
+      if (current) {
+        // Grade from persisted help, including interrupted replies, rather than a stale card render.
+        const result = JSON.parse(content);
+        if (current.call.hints?.length) {
+          result.hints = current.call.hints;
+          result.assisted = true;
+        }
+        content = JSON.stringify(result);
+      }
+      await addMessage(sid, { role: "tool", tool_name: call.function.name, content });
+      await reloadMessages(sid);
+      await teach(sid, signal);
+    });
   }
 
   /** Opens the exam lesson for a map node, creating and starting it the first time. */
@@ -185,7 +252,15 @@ export default function App() {
   const session = sessions.find((s) => s.id === activeId);
 
   return (
-    <div className="app">
+    <>
+    <div className="app" inert={updating}>
+      {update.state.version && !update.state.chosen && dismissedUpdate !== update.state.version && !settingsOpen && (
+        <div className="update-notice" role="status">
+          <span>Dusty {update.state.version} is available</span>
+          <button className="btn ghost" onClick={() => setSettingsOpen(true)}>View update</button>
+          <button className="btn ghost" aria-label="Dismiss update notice" onClick={() => setDismissedUpdate(update.state.version!)}>Later</button>
+        </div>
+      )}
       <Sidebar
         sessions={sessions}
         folders={folders}
@@ -225,22 +300,28 @@ export default function App() {
         onShowSidebar={sidebarOpen ? undefined : () => showSidebar(true)}
         onStop={() => run?.controller.abort()}
         onAnswer={answer}
-        onHint={async (messageId, callIndex, hint) => {
-          const sid = activeId!;
-          await addQuizHint(messageId, callIndex, hint);
-          await reloadMessages(sid);
-        }}
+        onDirtyChange={dirtyChanged}
+        locked={updating}
         onRetry={() => activeId && start(activeId)}
         onOpenSettings={() => setSettingsOpen(true)}
       />
       {settingsOpen && (
         <Settings
+          update={{ ...update, blocked: updateBlocked }}
+          onDirtyChange={(dirty) => dirtyChanged("settings", dirty)}
           onClose={(saved) => {
+            dirtyChanged("settings", false);
             setSettingsOpen(false);
             if (saved) loadConfig();
           }}
         />
       )}
     </div>
+    {updating && <div className="modal-backdrop update-overlay">
+      <div className="modal" role="dialog" aria-modal="true" aria-label="Updating Dusty" tabIndex={-1} ref={(el) => el?.focus()}>
+        <div className="modal-body"><UpdateProgress state={update.state} /><p className="muted">Dusty will restart when the update is installed.</p></div>
+      </div>
+    </div>}
+    </>
   );
 }

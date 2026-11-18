@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import {
   ArrowUp,
   BookmarkPlus,
@@ -44,7 +44,8 @@ type Props = {
   onSend: (text: string, material: Material[]) => void;
   onStop: () => void;
   onAnswer: (call: ToolCall, content: string) => void;
-  onHint: (messageId: number, callIndex: number, hint: Hint) => Promise<void>;
+  onDirtyChange: (source: string, dirty: boolean) => void;
+  locked?: boolean;
   onRetry: () => void;
   onOpenSettings: () => void;
   onStudy: (node: DepNode) => void;
@@ -76,10 +77,14 @@ function ToolView({
   result,
   onAnswer,
   probing,
-  onHint,
+  onAsk,
+  onRetry,
+  onDirtyChange,
 }: {
   call: ToolCall;
-  onHint: (hint: Hint) => Promise<void>;
+  onAsk?: () => void;
+  onRetry: () => void;
+  onDirtyChange: (dirty: boolean) => void;
   result?: string;
   onAnswer?: (content: string) => void;
   /** Still finding the student's level: no plan yet. */
@@ -90,8 +95,24 @@ function ToolView({
     return <div className="tool-chip muted">Skipped: {String(args.question ?? call.function.name)}</div>;
   }
   const answer = onAnswer ?? (() => {});
-  if (call.function.name === "quiz") return <QuizCard args={args} result={result} onAnswer={answer} fromBasics={probing && !!onAnswer} hints={call.hints} onHint={onHint} />;
-  if (call.function.name === "ask_user_question") return <QuestionCard args={args} result={result} onAnswer={answer} />;
+  if (call.function.name === "quiz") {
+    let hints: Hint[] = call.hints ?? [];
+    if (!hints.length && result) {
+      try { hints = JSON.parse(result).hints ?? []; } catch { /* Legacy non-JSON result. */ }
+    }
+    return <>
+      <QuizCard args={args} result={result} onAnswer={answer} disabled={!onAnswer} fromBasics={probing && !!onAnswer} hints={hints} onAsk={onAsk} onDirtyChange={onDirtyChange} />
+      {hints.map((h, i) => <div key={i} className="quiz-discussion">
+        <div className="msg user"><div className="bubble">{h.question}</div></div>
+        {h.answer && <div className="msg assistant"><Markdown text={h.answer} /></div>}
+        {h.status && onAsk && <div className="muted guidance-status">
+          {!onAnswer ? "Getting guidance…" : "This reply was interrupted."}
+          {onAnswer && i === hints.length - 1 && <button className="btn ghost" onClick={onRetry}>Retry</button>}
+        </div>}
+      </div>)}
+    </>;
+  }
+  if (call.function.name === "ask_user_question") return <QuestionCard args={args} result={result} onAnswer={answer} disabled={!onAnswer} onDirtyChange={onDirtyChange} />;
   if (call.function.name === "research") {
     return (
       <details className="tool-chip">
@@ -112,7 +133,7 @@ function ToolView({
   if (call.function.name === "complete_lesson") {
     return (
       <div className="tool-chip">
-        <CircleCheck size={14} /> Marked done on the exam map
+        {result?.startsWith("Marked done") && <CircleCheck size={14} />} {result ?? "Marking the lesson done"}
       </div>
     );
   }
@@ -156,6 +177,8 @@ function Composer({
   onLongPaste,
   canSendEmpty,
   blocked,
+  inputRef,
+  onDirtyChange,
 }: Pick<Props, "running" | "models" | "model" | "onModelChange" | "onStop"> & {
   onSend: (text: string) => void;
   disabled: boolean;
@@ -168,9 +191,15 @@ function Composer({
   canSendEmpty?: boolean;
   /** Not sendable yet, whatever the text. */
   blocked?: boolean;
+  inputRef: RefObject<HTMLTextAreaElement | null>;
+  onDirtyChange: (dirty: boolean) => void;
 }) {
   const [text, setText] = useState("");
-  const ref = useRef<HTMLTextAreaElement>(null);
+  const ref = inputRef;
+  useEffect(() => {
+    onDirtyChange(!!text);
+    return () => onDirtyChange(false);
+  }, [text]);
   useLayoutEffect(() => {
     const el = ref.current!;
     el.style.height = "auto";
@@ -265,8 +294,13 @@ export default function Chat(props: Props) {
   const scroller = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
   const fileInput = useRef<HTMLInputElement>(null);
+  const composerInput = useRef<HTMLTextAreaElement>(null);
   const [staged, setStaged] = useState<Staged[]>([]);
   const [dragging, setDragging] = useState(false);
+  useEffect(() => {
+    props.onDirtyChange("attachments", staged.length > 0);
+    return () => props.onDirtyChange("attachments", false);
+  }, [staged, props.onDirtyChange]);
 
   useEffect(() => {
     const el = scroller.current;
@@ -329,7 +363,8 @@ export default function Chat(props: Props) {
   );
 
   const pending = pendingCall(messages);
-  const waitingOnStudent = !running && !!pending && INTERACTIVE.has(pending.function.name);
+  const waitingOnStudent = !!pending && INTERACTIVE.has(pending.function.name);
+  const discussingQuiz = pending?.function.name === "quiz";
   // The plan's map ends probing.
   const probing = useMemo(() => !latestMap(messages), [messages]);
   const drafting = !session && draftKind === "exam";
@@ -337,9 +372,13 @@ export default function Chat(props: Props) {
     <Composer
       {...props}
       autoFocus
-      disabled={waitingOnStudent}
+      inputRef={composerInput}
+      onDirtyChange={(dirty) => props.onDirtyChange("composer", dirty)}
+      disabled={!!props.locked || (waitingOnStudent && !discussingQuiz)}
       placeholder={
-        waitingOnStudent
+        discussingQuiz
+          ? "Ask a question or talk through your reasoning"
+          : waitingOnStudent
           ? "Answer the question above to continue"
           : messages.length
             ? "Reply to Dusty"
@@ -349,6 +388,8 @@ export default function Chat(props: Props) {
       }
       onSend={(text) => {
         stick.current = true;
+        // Quiz discussion is text only; staged material waits for the next ordinary message.
+        if (discussingQuiz) return props.onSend(text, []);
         props.onSend(text, material);
         setStaged([]);
       }}
@@ -367,10 +408,10 @@ export default function Chat(props: Props) {
           </div>
         )
       }
-      onAttach={() => fileInput.current?.click()}
-      onLongPaste={attachText}
-      canSendEmpty={material.length > 0}
-      blocked={loading || !!sizeError}
+      onAttach={discussingQuiz ? undefined : () => fileInput.current?.click()}
+      onLongPaste={discussingQuiz ? undefined : attachText}
+      canSendEmpty={!discussingQuiz && material.length > 0}
+      blocked={!discussingQuiz && (loading || !!sizeError)}
     />
   );
   const sizeNotice = sizeError && <div className="composer-error">{sizeError}</div>;
@@ -403,8 +444,10 @@ export default function Chat(props: Props) {
             key={k}
             call={call}
             result={results[k]?.content}
-            onAnswer={waitingOnStudent && call === pending ? (content) => onAnswer(call, content) : undefined}
-            onHint={(hint) => props.onHint(m.id, k, hint)}
+            onAnswer={!running && !props.locked && waitingOnStudent && call === pending ? (content) => onAnswer(call, content) : undefined}
+            onAsk={call === pending ? () => composerInput.current?.focus() : undefined}
+            onRetry={onRetry}
+            onDirtyChange={(dirty) => props.onDirtyChange(`quiz-${m.id}-${k}`, dirty)}
             probing={probing}
           />
         ))}
@@ -416,7 +459,7 @@ export default function Chat(props: Props) {
     <main
       className={`main ${dragging ? "dragging" : ""}`}
       onDragOver={(e) => {
-        if (waitingOnStudent || !e.dataTransfer.types.includes("Files")) return;
+        if (waitingOnStudent || props.locked || !e.dataTransfer.types.includes("Files")) return;
         e.preventDefault();
         e.dataTransfer.dropEffect = "copy";
         setDragging(true);
@@ -427,7 +470,7 @@ export default function Chat(props: Props) {
       onDrop={(e) => {
         e.preventDefault();
         setDragging(false);
-        attach([...e.dataTransfer.files]);
+        if (!waitingOnStudent && !props.locked) attach([...e.dataTransfer.files]);
       }}
     >
       <input

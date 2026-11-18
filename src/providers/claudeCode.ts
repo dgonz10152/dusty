@@ -82,7 +82,7 @@ export const claudeCode: Provider = {
 
   async chat({ model, system, messages, tools, signal, onDelta }) {
     const msg: Message = { role: "assistant", content: "", thinking: "", tool_calls: [] };
-    await run("teach", model, `${system}\n\n${toolProtocol(tools)}`, toTranscript(messages), signal, (ev) => {
+    await run("teach", model, `${system}\n\n${tools.length ? toolProtocol(tools) : "No tools are available. Reply with plain guidance only."}`, toTranscript(messages), signal, (ev) => {
       applyEvent(msg, ev);
       onDelta?.(streamingView(msg));
     });
