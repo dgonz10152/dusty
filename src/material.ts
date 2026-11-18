@@ -31,6 +31,15 @@ export function withMaterial<M extends { id: number; content: string }>(messages
 }
 
 export const isImage = (name: string) => /\.(png|jpe?g|gif|webp|heic|heif|bmp|tiff?|avif)$/i.test(name);
+export const isDocument = (name: string) => /\.(pdf|txt|md|markdown)$/i.test(name);
+
+/** The files in a picked folder worth reading: nothing hidden, nothing unreadable, in path order. */
+export function folderFiles<F extends { name: string; webkitRelativePath: string }>(files: F[]): F[] {
+  const path = (f: F) => f.webkitRelativePath || f.name;
+  return files
+    .filter((f) => (isDocument(f.name) || isImage(f.name)) && !path(f).split("/").some((p) => p.startsWith(".")))
+    .sort((a, b) => path(a).localeCompare(path(b), undefined, { numeric: true }));
+}
 
 // Claude downscales anything with a longer edge past this anyway.
 const MAX_EDGE = 1568;
