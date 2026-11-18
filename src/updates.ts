@@ -6,11 +6,35 @@ export type GitHubRelease = { tag_name: string; draft: boolean; prerelease: bool
 type Feed = { current: string; releases: Release[] };
 type Found = { release?: Release; update: Package | null; chosen: boolean };
 
-/** Releases the updater can install: published ones that carry their own signed feed, newest first. */
-// ponytail: GitHub's created_at order stands in for semver order; Rust still refuses non-newer automatic updates.
+const SEMVER = /^v?\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/;
+
+/** Semantic version precedence (build metadata unsupported, tags never carry it). */
+export function compareVersions(a: string, b: string): number {
+  const parse = (v: string) => {
+    const [core, pre] = v.replace(/^v/, "").split(/-(.*)/s);
+    return { core: core.split(".").map(Number), pre: pre ? pre.split(".") : [] };
+  };
+  const x = parse(a), y = parse(b);
+  for (let i = 0; i < 3; i++) if (x.core[i] !== y.core[i]) return x.core[i] - y.core[i];
+  if (!x.pre.length || !y.pre.length) return y.pre.length - x.pre.length;
+  for (let i = 0; i < Math.max(x.pre.length, y.pre.length); i++) {
+    const p = x.pre[i], q = y.pre[i];
+    if (p === undefined) return -1;
+    if (q === undefined) return 1;
+    if (p === q) continue;
+    const pn = /^\d+$/.test(p), qn = /^\d+$/.test(q);
+    if (pn && qn) return Number(p) - Number(q);
+    if (pn !== qn) return pn ? -1 : 1;
+    return p < q ? -1 : 1;
+  }
+  return 0;
+}
+
+/** Releases the updater can install: published ones that carry their own signed feed, highest version first. */
 export function installable(releases: GitHubRelease[]): Release[] {
-  return releases.filter((r) => !r.draft && r.assets.some((a) => a.name === "latest.json"))
-    .map((r) => ({ tag: r.tag_name, version: r.tag_name.replace(/^v/, ""), prerelease: r.prerelease }));
+  return releases.filter((r) => !r.draft && SEMVER.test(r.tag_name) && r.assets.some((a) => a.name === "latest.json"))
+    .map((r) => ({ tag: r.tag_name, version: r.tag_name.replace(/^v/, ""), prerelease: r.prerelease }))
+    .sort((a, b) => compareVersions(b.version, a.version));
 }
 
 export type UpdateState = {
@@ -63,7 +87,8 @@ export class Updates {
       this.set({ current, releases });
       // Prerelease builds follow newer prereleases; stable builds only follow stable releases.
       const release = releases.find((r) => !r.prerelease || current.includes("-"));
-      return { release, update: release ? await this.find(release.tag, false) : null, chosen: false };
+      const newer = release && compareVersions(release.version, current) > 0;
+      return { release, update: newer ? await this.find(release.tag, false) : null, chosen: false };
     });
   }
 

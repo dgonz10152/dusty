@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { installable, Updates, type Release } from "./updates.ts";
+import { compareVersions, installable, Updates, type Release } from "./updates.ts";
 
 const stable: Release = { tag: "v0.2.0", version: "0.2.0", prerelease: false };
 const beta: Release = { tag: "v0.3.0-beta.1", version: "0.3.0-beta.1", prerelease: true };
@@ -121,4 +121,27 @@ test("only published releases with a feed are installable", () => {
     { tag_name: "v0.2.1", draft: true, prerelease: false, assets: [asset("latest.json")] },
     { tag_name: "v0.1.0", draft: false, prerelease: true, assets: [asset("Dusty_0.1.0_x64.dmg")] },
   ]), [beta]);
+});
+
+test("releases are ordered by semantic version, not publish order", () => {
+  const asset = [{ name: "latest.json" }];
+  const r = (tag_name: string, prerelease = tag_name.includes("-")) => ({ tag_name, draft: false, prerelease, assets: asset });
+  assert.deepEqual(installable([r("v0.2.1"), r("v0.3.0-beta.2"), r("v0.3.0-beta.10"), r("v0.3.0"), r("nightly")]).map((x) => x.version),
+    ["0.3.0", "0.3.0-beta.10", "0.3.0-beta.2", "0.2.1"]);
+  const ordered = ["1.0.0-alpha", "1.0.0-alpha.1", "1.0.0-alpha.beta", "1.0.0-beta", "1.0.0-beta.2", "1.0.0-beta.11", "1.0.0-rc.1", "1.0.0"];
+  for (let i = 1; i < ordered.length; i++) assert.ok(compareVersions(ordered[i - 1], ordered[i]) < 0, `${ordered[i - 1]} < ${ordered[i]}`);
+  assert.equal(compareVersions("v1.2.3", "1.2.3"), 0);
+});
+
+test("a prerelease build finds a newer beta published before a maintenance release", async () => {
+  const asked: string[] = [];
+  const maintenance: Release = { tag: "v0.2.1", version: "0.2.1", prerelease: false };
+  const newer: Release = { tag: "v0.3.0-beta.2", version: "0.3.0-beta.2", prerelease: true };
+  const releases = installable([maintenance, newer].map((x) => ({ tag_name: x.tag, draft: false, prerelease: x.prerelease, assets: [{ name: "latest.json" }] })));
+  const updates = new Updates(feed("0.3.0-beta.1", releases), async (tag) => { asked.push(tag); return { version: "0.3.0-beta.2", close: async () => {}, downloadAndInstall: async () => {} }; }, async () => {});
+  await updates.check();
+  assert.deepEqual(asked, ["v0.3.0-beta.2"]);
+  assert.equal(updates.state.version, "0.3.0-beta.2");
+  await new Updates(feed("0.3.0", releases), async (tag) => { asked.push(tag); return null; }, async () => {}).check();
+  assert.equal(asked.length, 1);
 });

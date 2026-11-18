@@ -106,13 +106,13 @@ export default function App() {
   }, [refreshSessions, loadConfig]);
 
   function select(sid: string | null, kind: Session["kind"] = "lesson") {
+    // Clear only on a real switch, so another session's cards never show; reselecting keeps drafts.
+    if (sid !== activeRef.current) setMessages([]);
     activeRef.current = sid;
     setActiveId(sid);
     setDraftKind(kind);
     setAttachments([]);
-    setMessages([]);
     if (sid) reloadMessages(sid);
-    else setMessages([]);
   }
 
   function setError(sid: string, error?: string) {
