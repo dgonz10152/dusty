@@ -13,7 +13,7 @@ export type QuizArgs = {
 };
 
 /** A clarifying question the student asked before answering, and the reply they got. */
-export type Hint = { question: string; answer: string };
+export type Hint = { question: string; answer: string; status?: "pending" | "stopped" | "failed" };
 
 export type QuizResult = {
   /** `from_basics`: the student asked to be taught from the basics instead of answering. */
@@ -22,6 +22,7 @@ export type QuizResult = {
   correctAnswer: string[];
   note?: string;
   hints?: Hint[];
+  assisted?: boolean;
 };
 
 // Models send loose shapes: options as strings or JSON strings, correctAnswer as a label instead of a value.
@@ -64,11 +65,27 @@ function maybeJson(v: unknown): unknown {
 
 /** `selected === null` means "I don't know". Multi-select is an exact-set match. */
 export function gradeQuiz(args: QuizArgs, selected: string[] | null, note?: string, hints: Hint[] = []): QuizResult {
-  const base = { correctAnswer: args.correct, ...(note?.trim() && { note: note.trim() }), ...(hints.length && { hints }) };
+  const base = { correctAnswer: args.correct, ...(note?.trim() && { note: note.trim() }), ...(hints.length && { hints, assisted: true }) };
   if (selected === null) return { result: "dont_know", selected: [], ...base };
   const want = new Set(args.correct);
   const ok = selected.length === want.size && selected.every((s) => want.has(s));
   return { result: ok ? "correct" : "wrong", selected, ...base };
+}
+
+export function isAssisted(result: QuizResult): boolean {
+  return result.assisted === true || !!result.hints?.length;
+}
+
+/** Completion needs the latest check to demonstrate independent understanding. */
+export function canCompleteLesson(messages: Message[]): boolean {
+  const last = messages.findLast((m) => m.role === "tool" && m.tool_name === "quiz");
+  if (!last) return false;
+  try {
+    const result = JSON.parse(last.content) as QuizResult;
+    return result.result === "correct" && !isAssisted(result);
+  } catch {
+    return false;
+  }
 }
 
 // A model sometimes writes a quiz or question as a JSON block ending its reply instead of calling the tool

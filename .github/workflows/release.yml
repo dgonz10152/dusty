@@ -4,6 +4,10 @@ on:
   release:
     types: [published]
 
+concurrency:
+  group: release-${{ github.event.release.id }}
+  cancel-in-progress: false
+
 jobs:
   build:
     name: Build ${{ matrix.target }}
@@ -18,10 +22,10 @@ jobs:
             bundles: nsis,msi
           - os: macos-latest
             target: aarch64-apple-darwin
-            bundles: dmg
+            bundles: app,dmg
           - os: macos-latest
             target: x86_64-apple-darwin
-            bundles: dmg
+            bundles: app,dmg
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -44,6 +48,36 @@ jobs:
         uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           releaseId: ${{ github.event.release.id }}
+          tagName: ${{ github.event.release.tag_name }}
+          uploadUpdaterJson: false
           args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
+
+  publish-update:
+    name: Publish complete update feed
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      RELEASE_TAG: ${{ github.event.release.tag_name }}
+      RELEASE_ID: ${{ github.event.release.id }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Download release metadata and signatures
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" > release.json
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern '*.sig' --dir update-signatures
+      - name: Validate all platforms and write update manifest
+        run: node scripts/update-manifest.mjs release.json update-signatures latest.json
+      - name: Publish update manifest
+        run: gh release upload "$RELEASE_TAG" latest.json --repo "$GITHUB_REPOSITORY" --clobber

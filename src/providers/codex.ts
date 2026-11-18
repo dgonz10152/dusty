@@ -63,7 +63,7 @@ export const codex: Provider = {
     return await invoke<boolean>("codex_available") ? null : "Install Codex CLI, run codex login in a terminal, then restart Dusty.";
   },
   async chat({ model, system, messages, tools, signal, onDelta }) {
-    return parseToolBlock(await run("teach", model, `${system}\n\n${toolProtocol(tools)}`, toTranscript(messages), signal, onDelta));
+    return parseToolBlock(await run("teach", model, `${system}\n\n${tools.length ? toolProtocol(tools) : "No tools are available. Reply with plain guidance only."}`, toTranscript(messages), signal, onDelta));
   },
   async research({ model, system, question, signal }) {
     return (await run("research", model, system, question, signal)).content;

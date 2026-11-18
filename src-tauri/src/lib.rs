@@ -263,10 +263,56 @@ fn migrations() -> Vec<Migration> {
     }]
 }
 
+/// Feed metadata the JS `Update` class is built from; mirrors tauri-plugin-updater's own `check` result.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ReleaseUpdate {
+    rid: tauri::ResourceId,
+    current_version: String,
+    version: String,
+    body: Option<String>,
+    raw_json: serde_json::Value,
+}
+
+/// Checks one GitHub release's signed update feed. `switch` accepts any other version, so users
+/// can move to an older prerelease or back to stable; otherwise only newer versions are offered.
+#[tauri::command]
+async fn release_update(
+    webview: tauri::Webview,
+    tag: String,
+    switch: bool,
+) -> Result<Option<ReleaseUpdate>, String> {
+    use tauri_plugin_updater::UpdaterExt;
+    if tag.is_empty() || !tag.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_')) {
+        return Err(format!("Invalid release tag {tag:?}"));
+    }
+    let url = format!("https://github.com/dgonz10152/dusty/releases/download/{tag}/latest.json")
+        .parse()
+        .map_err(|e| format!("{e}"))?;
+    let mut builder = webview
+        .updater_builder()
+        .endpoints(vec![url])
+        .map_err(|e| e.to_string())?
+        .timeout(std::time::Duration::from_secs(15));
+    if switch {
+        builder = builder.version_comparator(|current, remote| remote.version != current);
+    }
+    let update = builder.build().map_err(|e| e.to_string())?.check().await.map_err(|e| e.to_string())?;
+    Ok(update.map(|u| ReleaseUpdate {
+        current_version: u.current_version.clone(),
+        version: u.version.clone(),
+        body: u.body.clone(),
+        raw_json: u.raw_json.clone(),
+        rid: webview.resources_table().add(u),
+    }))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_http::init())
         .plugin(
             tauri_plugin_sql::Builder::default()
@@ -284,7 +330,8 @@ pub fn run() {
             codex_available,
             codex_models,
             codex_run,
-            codex_stop
+            codex_stop,
+            release_update
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

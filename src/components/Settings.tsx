@@ -4,6 +4,7 @@ import { X } from "lucide-react";
 import { getSetting, setSetting } from "../db";
 import { DEFAULT_HOST } from "../providers/ollama";
 import { EMPTY_PROFILE, type Profile } from "../prompts";
+import { UpdateSettings, type UpdateControls } from "./Updates";
 
 const PROFILE_FIELDS: { key: keyof Profile; label: string; placeholder: string; multiline?: boolean }[] = [
   { key: "name", label: "Name", placeholder: "Alex" },
@@ -15,7 +16,7 @@ const PROFILE_FIELDS: { key: keyof Profile; label: string; placeholder: string; 
   { key: "notes", label: "Anything else", placeholder: "Strong in calculus, rusty on proofs", multiline: true },
 ];
 
-export default function Settings({ onClose }: { onClose: (saved: boolean) => void }) {
+export default function Settings({ onClose, onDirtyChange, update }: { onClose: (saved: boolean) => void; onDirtyChange: (dirty: boolean) => void; update: UpdateControls }) {
   const [host, setHost] = useState(DEFAULT_HOST);
   const [hasKey, setHasKey] = useState(false);
   const [key, setKey] = useState("");
@@ -53,7 +54,7 @@ export default function Settings({ onClose }: { onClose: (saved: boolean) => voi
 
   return (
     <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose(false)}>
-      <div className="modal" role="dialog" aria-labelledby="settings-title">
+      <div className="modal" role="dialog" aria-labelledby="settings-title" onChangeCapture={(e) => !(e.target as Element).closest(".update-settings") && onDirtyChange(true)}>
         <header className="modal-header">
           <h2 id="settings-title">Settings</h2>
           <button className="icon-btn" aria-label="Close" onClick={() => onClose(false)}>
@@ -61,6 +62,7 @@ export default function Settings({ onClose }: { onClose: (saved: boolean) => voi
           </button>
         </header>
         <div className="modal-body">
+          <UpdateSettings {...update} />
           <section>
             <h3>Ollama</h3>
             <label className="field">
