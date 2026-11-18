@@ -388,6 +388,8 @@ export default function Chat(props: Props) {
       }
       onSend={(text) => {
         stick.current = true;
+        // Quiz discussion is text only; staged material waits for the next ordinary message.
+        if (discussingQuiz) return props.onSend(text, []);
         props.onSend(text, material);
         setStaged([]);
       }}
@@ -408,8 +410,8 @@ export default function Chat(props: Props) {
       }
       onAttach={discussingQuiz ? undefined : () => fileInput.current?.click()}
       onLongPaste={discussingQuiz ? undefined : attachText}
-      canSendEmpty={material.length > 0}
-      blocked={loading || !!sizeError}
+      canSendEmpty={!discussingQuiz && material.length > 0}
+      blocked={!discussingQuiz && (loading || !!sizeError)}
     />
   );
   const sizeNotice = sizeError && <div className="composer-error">{sizeError}</div>;
