@@ -6,6 +6,7 @@ import {
   ChevronRight,
   CircleCheck,
   FileText,
+  FolderOpen,
   Globe,
   GraduationCap,
   ImageIcon,
@@ -22,7 +23,7 @@ import { INTERACTIVE, pendingCall, transcribeImage, type Live } from "../agent";
 import { PROVIDERS, sameModel } from "../providers";
 import type { Attachment, ChatMessage, Session } from "../db";
 import { latestMap, type DepNode } from "../graph";
-import { extractText, isImage, materialError, type Material } from "../material";
+import { extractText, folderFiles, isDocument, isImage, materialError, type Material } from "../material";
 
 type Props = {
   session?: Session;
@@ -122,7 +123,6 @@ function ToolView({
 /** A file in the composer, before it's sent. */
 type Staged = { id: string; name: string; content?: string; error?: string };
 
-const DOCUMENT = /\.(pdf|txt|md|markdown)$/i;
 // Pastes longer than this become an attachment instead of filling the message box.
 const LONG_PASTE = 2000;
 
@@ -153,6 +153,7 @@ function Composer({
   autoFocus,
   attachments,
   onAttach,
+  onAttachFolder,
   onLongPaste,
   canSendEmpty,
   blocked,
@@ -163,6 +164,7 @@ function Composer({
   autoFocus?: boolean;
   attachments?: ReactNode;
   onAttach?: () => void;
+  onAttachFolder?: () => void;
   onLongPaste?: (text: string) => void;
   /** Sendable without text, because something is attached. */
   canSendEmpty?: boolean;
@@ -224,6 +226,17 @@ function Composer({
               <Paperclip size={16} />
             </button>
           )}
+          {onAttachFolder && (
+            <button
+              className="icon-btn attach-btn"
+              aria-label="Add a folder"
+              title="Add every PDF, picture, .txt, and .md file in a folder"
+              disabled={disabled}
+              onClick={onAttachFolder}
+            >
+              <FolderOpen size={16} />
+            </button>
+          )}
           <label className="model-picker">
             <select
               value={options.findIndex((m) => sameModel(m, model))}
@@ -265,6 +278,7 @@ export default function Chat(props: Props) {
   const scroller = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
   const fileInput = useRef<HTMLInputElement>(null);
+  const folderInput = useRef<HTMLInputElement>(null);
   const [staged, setStaged] = useState<Staged[]>([]);
   const [dragging, setDragging] = useState(false);
 
@@ -275,10 +289,15 @@ export default function Chat(props: Props) {
 
   const patch = (id: string, a: Partial<Staged>) => setStaged((list) => list.map((x) => (x.id === id ? { ...x, ...a } : x)));
   function attach(files: File[]) {
+    const have = new Set(staged.map((a) => a.name));
     for (const file of files) {
       const id = crypto.randomUUID();
+      // A folder's files keep their path inside it, so the tutor sees how the course is organized.
+      const name = file.webkitRelativePath || file.name;
+      // Picking the same file or folder again doesn't send it twice.
+      if (have.has(name)) continue;
       if (isImage(file.name)) {
-        setStaged((list) => [...list, { id, name: file.name }]);
+        setStaged((list) => [...list, { id, name }]);
         transcribeImage(file).then(
           (content) => patch(id, { content }),
           (e) =>
@@ -290,16 +309,22 @@ export default function Chat(props: Props) {
         );
         continue;
       }
-      if (!DOCUMENT.test(file.name)) {
-        setStaged((list) => [...list, { id, name: file.name, error: "Only PDFs, pictures, .txt, and .md files" }]);
+      if (!isDocument(file.name)) {
+        setStaged((list) => [...list, { id, name, error: "Only PDFs, pictures, .txt, and .md files" }]);
         continue;
       }
-      setStaged((list) => [...list, { id, name: file.name }]);
+      setStaged((list) => [...list, { id, name }]);
       extractText(file).then(
         (content) => patch(id, content.replace(/--- Page \d+ ---/g, "").trim() ? { content } : { error: "No text found. Is it a scanned PDF?" }),
         () => patch(id, { error: "Couldn't read this file" }),
       );
     }
+  }
+  function attachFolder(files: File[]) {
+    const usable = folderFiles(files);
+    if (usable.length) return attach(usable);
+    const folder = files[0]?.webkitRelativePath.split("/")[0] ?? "That folder";
+    setStaged((list) => [...list, { id: crypto.randomUUID(), name: folder, error: "No PDFs, pictures, .txt, or .md files in it" }]);
   }
   function attachText(content: string) {
     setStaged((list) => {
@@ -333,6 +358,7 @@ export default function Chat(props: Props) {
   // The plan's map ends probing.
   const probing = useMemo(() => !latestMap(messages), [messages]);
   const drafting = !session && draftKind === "exam";
+  const examMode = drafting || session?.kind === "exam";
   const composer = (
     <Composer
       {...props}
@@ -344,7 +370,7 @@ export default function Chat(props: Props) {
           : messages.length
             ? "Reply to Dusty"
             : drafting
-              ? "Which exam is it? Add your material with the paperclip, or drop files here"
+              ? "Which exam is it? Add files or a folder of them, or drop files here"
               : "Ask Dusty to teach you anything, or drop in your notes"
       }
       onSend={(text) => {
@@ -368,6 +394,7 @@ export default function Chat(props: Props) {
         )
       }
       onAttach={() => fileInput.current?.click()}
+      onAttachFolder={examMode ? () => folderInput.current?.click() : undefined}
       onLongPaste={attachText}
       canSendEmpty={material.length > 0}
       blocked={loading || !!sizeError}
@@ -441,6 +468,17 @@ export default function Chat(props: Props) {
           e.currentTarget.value = "";
         }}
       />
+      <input
+        ref={folderInput}
+        type="file"
+        hidden
+        // React's types don't know it, but WebKit and WebView2 open a folder picker and hand over every file inside.
+        {...{ webkitdirectory: "" }}
+        onChange={(e) => {
+          attachFolder([...(e.currentTarget.files ?? [])]);
+          e.currentTarget.value = "";
+        }}
+      />
       <header className={`main-header ${props.onShowSidebar ? "sidebar-hidden" : ""}`} data-tauri-drag-region>
         {props.onShowSidebar && (
           <button className="icon-btn sidebar-toggle" aria-label="Show sidebar" title="Show sidebar" onClick={props.onShowSidebar}>
@@ -467,7 +505,7 @@ export default function Chat(props: Props) {
           <h1>{drafting ? "What's your exam on?" : "What do you want to learn?"}</h1>
           <p className="muted">
             {drafting
-              ? "Add your slides, notes, study guide, or photos of them. Dusty maps every concept on the exam, then teaches each one as its own lesson."
+              ? "Add your slides, notes, study guide, photos of them, or the folder they live in. Dusty maps every concept on the exam, then teaches each one as its own lesson."
               : "Dusty finds what you already know, plans a path, then teaches it so it sticks."}
           </p>
           {setupHint && (
