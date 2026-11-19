@@ -19,7 +19,8 @@ jobs:
         include:
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-            bundles: nsis,msi
+            # MSI versions reject non-numeric prerelease identifiers like beta.1; NSIS carries updates.
+            bundles: ${{ contains(github.event.release.tag_name, '-') && 'nsis' || 'nsis,msi' }}
           - os: macos-latest
             target: aarch64-apple-darwin
             bundles: app,dmg
