@@ -79,7 +79,7 @@ npm run tauri build # production bundle
 
 ## Releases
 
-Publishing a GitHub release or prerelease runs the **Release builds** workflow and attaches Windows x64 installers (`.exe` and `.msi`) and separate macOS Apple Silicon (`aarch64`) and Intel (`x64`) `.dmg` downloads to that release.
+Publishing a GitHub release or prerelease runs the **Release builds** workflow and attaches Windows x64 installers (`.exe`, plus `.msi` for stable versions, since MSI rejects versions like `0.2.0-beta.1`) and separate macOS Apple Silicon (`aarch64`) and Intel (`x64`) `.dmg` downloads to that release.
 Saving a draft does not start builds.
 
 1. Update the version in `package.json`, `src-tauri/tauri.conf.json`, and `src-tauri/Cargo.toml`, and refresh the npm and Cargo lockfiles.
